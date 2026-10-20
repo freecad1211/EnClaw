@@ -37,7 +37,7 @@ _DEPENDENCY_FILES = {
 
 
 
-_SENSITIVE_ENV_SUFFIXES = ("_TOKEN", "_SECRET", "_PASSWORD")
+_SENSITIVE_ENV_SUFFIXES = ("_TOKEN", "_SECRET", "_PASSWORD", "_API_KEY", "_ACCESS_KEY", "_PRIVATE_KEY", "_CREDENTIALS")
 
 
 def _agent_env(runner: dict[str, Any] | None = None) -> dict[str, str]:
