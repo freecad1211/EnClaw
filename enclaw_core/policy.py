@@ -39,7 +39,7 @@ def default_policy(
         "project": {
             "id": project_id,
             "repo_root": str(Path(repo_root).expanduser().resolve()),
-            "workspace_root": str((Path(repo_root).expanduser().resolve() / ".enclaw" / "worktrees")),
+            "workspace_root": str((Path(repo_root).expanduser().resolve().parent / f".{Path(repo_root).expanduser().resolve().name}-enclaw-worktrees")),
         },
         "git": {
             "base_branch": base_branch,
