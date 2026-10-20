@@ -47,6 +47,22 @@ class TaskStoreTests(unittest.TestCase):
         with self.assertRaises(TaskStoreError):
             self.store.request_cancel(self.task["task_id"])
 
+    def test_project_worker_slots_enforce_capacity_and_release(self):
+        first = self.store.acquire_project_slot("relune", 1)
+        self.assertIsNotNone(first)
+        self.assertIsNone(self.store.acquire_project_slot("relune", 1))
+        # A different project has an independent concurrency budget.
+        other = self.store.acquire_project_slot("other", 1)
+        self.assertIsNotNone(other)
+        self.store.release_project_slot(first)
+        replacement = self.store.acquire_project_slot("relune", 1)
+        self.assertIsNotNone(replacement)
+        self.store.release_project_slot(other)
+        self.store.release_project_slot(replacement)
+
+    def test_zero_project_worker_limit_disables_workers(self):
+        self.assertIsNone(self.store.acquire_project_slot("relune", 0))
+
     def test_task_list_can_be_filtered_by_project(self):
         self.store.create("other", "Other task", "Separate project")
         self.assertEqual(len(self.store.list(project_id="relune")), 1)
