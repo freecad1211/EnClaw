@@ -92,7 +92,7 @@ def create_worktree(policy: dict[str, Any], task_id: str, branch: str) -> Path:
     return destination
 
 
-_SENSITIVE_ENV_SUFFIXES = ("_TOKEN", "_SECRET", "_PASSWORD")
+_SENSITIVE_ENV_SUFFIXES = ("_TOKEN", "_SECRET", "_PASSWORD", "_API_KEY", "_ACCESS_KEY", "_PRIVATE_KEY", "_CREDENTIALS")
 
 
 def _validation_env(runner: dict[str, Any]) -> dict[str, str]:
