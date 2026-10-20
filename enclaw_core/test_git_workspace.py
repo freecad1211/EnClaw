@@ -36,6 +36,7 @@ class GitWorkspaceTests(unittest.TestCase):
         self.policy = default_policy("test", str(self.root), "develop", "enclaw/integration")
         self.policy["project"]["workspace_root"] = str(self.root.parent / "worktrees")
         self.policy["validation"]["require_independent_review"] = False
+        self.policy["runner"]["require_sandbox"] = False  # integration tests explicitly opt out
         self.policy["validation"]["commands"] = [[
             "python3", "-c", "from pathlib import Path; assert Path('README.md').exists()"
         ]]
