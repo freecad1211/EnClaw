@@ -54,6 +54,18 @@ class GitWorkspaceTests(unittest.TestCase):
         with self.assertRaises(PolicyError):
             integrate_task_branch(self.policy, "enclaw/task/task-3", "develop")
 
+    def test_integration_refuses_empty_validation_commands(self):
+        git(self.root, "branch", "enclaw/task/task-empty-checks", "develop")
+        integration_path = self.root.parent / "integration-empty-checks"
+        git(self.root, "worktree", "add", str(integration_path), "enclaw/integration")
+        policy = dict(self.policy)
+        policy["validation"] = dict(self.policy["validation"])
+        policy["validation"]["commands"] = []
+        with self.assertRaises(PolicyError):
+            integrate_task_branch(
+                policy, "enclaw/task/task-empty-checks", "enclaw/integration"
+            )
+
     def test_requires_review_when_policy_requires_it(self):
         policy = dict(self.policy)
         policy["validation"] = dict(self.policy["validation"])
