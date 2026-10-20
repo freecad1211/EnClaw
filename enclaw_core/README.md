@@ -67,7 +67,19 @@ python3 -m enclaw_core.cli task-cancel TASK_ID
 python3 -m enclaw_core.cli task-events TASK_ID
 ```
 
-The database defaults to `~/.local/state/enclaw/tasks.sqlite3`. Set `ENCLAW_DB_PATH` or pass `--db` to choose a location. Cancellation is recorded as a request; a future worker must observe it and stop cooperatively.
+The database defaults to `~/.local/state/enclaw/tasks.sqlite3`. Set `ENCLAW_DB_PATH` or pass `--db` to choose a location. Cancellation is recorded as a request and the configured worker checks it while the agent process is running.
+
+## Run one queued task
+
+The worker is opt-in and runs at most one task per invocation:
+
+```bash
+python3 -m enclaw_core.cli worker-once --projects ~/.config/enclaw/projects.json
+```
+
+Before enabling it, edit each project's policy and configure both `runner.agent_command` and `runner.review_command`. Each must be an argv array containing `{prompt}`; no shell string is accepted. Use a coding CLI that is already configured for a local or explicitly approved free model. The reviewer command must be genuinely independent and return `APPROVE` as its first non-empty output line only when the change passes review.
+
+The Discord `/worker-once` command starts the same one-task worker in the bot process. Only configured operator IDs can use it. The bot allows one worker at a time per process.
 
 ## Local-first provider selection
 
