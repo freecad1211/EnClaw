@@ -127,8 +127,7 @@ class BuiltInSandboxTests(unittest.TestCase):
             root.mkdir()
             worktree.mkdir()
             _git(root, "init", "-b", "develop")
-            with mock.patch("enclaw_core.sandbox.sys.platform", "linux"), \\
-                 mock.patch("enclaw_core.sandbox.shutil.which", return_value=None):
+            with mock.patch("enclaw_core.sandbox.sys.platform", "linux"), mock.patch("enclaw_core.sandbox.shutil.which", return_value=None):
                 with self.assertRaisesRegex(SandboxError, "not installed"):
                     build_bwrap_argv(worktree, root, ["python3", "-c", "pass"])
 
@@ -139,8 +138,7 @@ class BuiltInSandboxTests(unittest.TestCase):
             root.mkdir()
             worktree.mkdir()
             _git(root, "init", "-b", "develop")
-            with mock.patch("enclaw_core.sandbox.sys.platform", "linux"), \\
-                 mock.patch("enclaw_core.sandbox.shutil.which", return_value="/usr/bin/bwrap"):
+            with mock.patch("enclaw_core.sandbox.sys.platform", "linux"), mock.patch("enclaw_core.sandbox.shutil.which", return_value="/usr/bin/bwrap"):
                 command = build_bwrap_argv(worktree, root, ["python3", "-c", "pass"])
             self.assertIn("--unshare-all", command)
             self.assertIn("--ro-bind", command)
