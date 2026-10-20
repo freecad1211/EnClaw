@@ -19,7 +19,7 @@ except ImportError as exc:  # pragma: no cover - exercised in install environmen
     raise SystemExit("Install requirements first: python3 -m pip install -r requirements.txt") from exc
 
 from .policy import PolicyError, load_policy
-from .runner import run_one_task
+from .runner import run_one_task, run_worker_pool
 from .orchestrator import Orchestrator, OrchestrationError
 from .tasks import TaskStore, TaskStoreError
 
@@ -243,6 +243,44 @@ def build_bot() -> discord.Client:
                     print(f"EnClaw worker stopped safely: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
         asyncio.create_task(background_worker())
+
+    @tree.command(name="worker-pool", description="Run a bounded pool of workers under project concurrency limits")
+    @app_commands.describe(workers="Maximum local worker threads (1-16)")
+    async def worker_pool(interaction: discord.Interaction, workers: app_commands.Range[int, 1, 16] = 4) -> None:
+        if not await authorized(interaction):
+            return
+        if worker_lock.locked():
+            await interaction.response.send_message("A worker or pool is already running in this bot process.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        async def background_pool() -> None:
+            async with worker_lock:
+                try:
+                    results = await asyncio.to_thread(
+                        run_worker_pool,
+                        _database_path(),
+                        load_projects(),
+                        workers=workers,
+                        actor=f"discord-pool:{interaction.user.id}",
+                    )
+                    completed = sum(1 for item in results if item.get("status") == "completed")
+                    failed = sum(1 for item in results if item.get("status") == "failed")
+                    await interaction.followup.send(
+                        f"Worker pool finished. Completed: {completed}; failed: {failed}; results: {len(results)}.",
+                        ephemeral=True,
+                    )
+                except Exception as exc:
+                    await interaction.followup.send(
+                        f"Worker pool stopped safely: {type(exc).__name__}: {exc}"[:1900],
+                        ephemeral=True,
+                    )
+
+        asyncio.create_task(background_pool())
+        await interaction.followup.send(
+            f"Started a pool with {workers} local worker threads. Project policy controls actual per-project concurrency.",
+            ephemeral=True,
+        )
 
     @tree.command(name="orchestrate-once", description="Decompose one queued task into bounded child tasks")
     @app_commands.describe(max_children="Maximum child tasks to allow (1-16)")
