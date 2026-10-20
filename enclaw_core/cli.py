@@ -129,7 +129,10 @@ def main(argv: list[str] | None = None) -> int:
                     raise PolicyError("Every project registry entry requires string id and policy_path.")
                 if entry["id"] in projects:
                     raise PolicyError(f"Duplicate project id in registry: {entry['id']}")
-                projects[entry["id"]] = entry
+                policy_path = Path(entry["policy_path"]).expanduser()
+                if not policy_path.is_absolute():
+                    policy_path = registry_path.parent / policy_path
+                projects[entry["id"]] = {**entry, "policy_path": str(policy_path.resolve())}
             result = run_one_task(args.db or os.environ.get("ENCLAW_DB_PATH", "~/.local/state/enclaw/tasks.sqlite3"), projects)
             print(json.dumps(result, indent=2) if result else "No queued task was available.")
         return 0
