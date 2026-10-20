@@ -1,11 +1,11 @@
 """Discord slash-command control plane for EnClaw's durable task queue.
 
-This adapter can create and inspect tasks, but it does not execute them. A worker
-must be implemented and enabled separately before tasks become autonomous work.
+This adapter can create and inspect tasks and start one explicitly configured worker task.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -19,6 +19,7 @@ except ImportError as exc:  # pragma: no cover - exercised in install environmen
     raise SystemExit("Install requirements first: python3 -m pip install -r requirements.txt") from exc
 
 from .policy import PolicyError, load_policy
+from .runner import run_one_task
 from .tasks import TaskStore, TaskStoreError
 
 
@@ -86,6 +87,7 @@ def build_bot() -> discord.Client:
     intents = discord.Intents.none()
     client = discord.Client(intents=intents)
     tree = app_commands.CommandTree(client)
+    worker_lock = asyncio.Lock()
 
     async def authorized(interaction: discord.Interaction) -> bool:
         if interaction.user.id not in operators:
@@ -184,6 +186,33 @@ def build_bot() -> discord.Client:
             f"Cancellation requested for `{task_id}`. A worker must observe this flag to stop.",
             ephemeral=True,
         )
+
+    @tree.command(name="worker-once", description="Start one queued task using the configured agent and reviewer")
+    async def worker_once(interaction: discord.Interaction) -> None:
+        if not await authorized(interaction):
+            return
+        if worker_lock.locked():
+            await interaction.response.send_message("A worker is already running in this bot process.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            "Worker started. Check task status with /enclaw-status or /task-show. "
+            "The worker uses only the project policy's configured commands.",
+            ephemeral=True,
+        )
+
+        async def background_worker() -> None:
+            async with worker_lock:
+                try:
+                    await asyncio.to_thread(
+                        run_one_task,
+                        _database_path(),
+                        load_projects(),
+                        actor=f"discord-worker:{interaction.user.id}",
+                    )
+                except Exception as exc:
+                    print(f"EnClaw worker stopped safely: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+
+        asyncio.create_task(background_worker())
 
     @tree.command(name="project-policy", description="Show a project's policy summary")
     async def project_policy(interaction: discord.Interaction, project_id: str) -> None:
