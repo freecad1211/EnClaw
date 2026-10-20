@@ -298,6 +298,7 @@ def _run_one_task_claimed(
             source_branch=branch,
             target_branch=policy["git"]["integration_branch"],
             review_approved=True,
+            reviewed_commit=commit_before_review,
         )
         return store.transition(
             task_id, "completed", actor=actor,
