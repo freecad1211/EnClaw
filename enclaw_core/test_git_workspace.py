@@ -74,6 +74,48 @@ class GitWorkspaceTests(unittest.TestCase):
         with self.assertRaises(PolicyError):
             integrate_task_branch(policy, "enclaw/task/task-4", "enclaw/integration")
 
+    def test_review_approval_is_bound_to_exact_source_commit(self):
+        policy = dict(self.policy)
+        policy["validation"] = dict(self.policy["validation"])
+        policy["validation"]["require_independent_review"] = True
+        task_path = create_worktree(policy, "task-review-sha", "enclaw/task/task-review-sha")
+        (task_path / "feature.txt").write_text("reviewed\\n", encoding="utf-8")
+        git(task_path, "add", "feature.txt")
+        git(task_path, "commit", "-m", "reviewed change")
+        reviewed_commit = git(task_path, "rev-parse", "HEAD")
+
+        # A later commit invalidates the prior review approval.
+        (task_path / "feature.txt").write_text("changed after review\\n", encoding="utf-8")
+        git(task_path, "add", "feature.txt")
+        git(task_path, "commit", "-m", "change after review")
+        integration_path = self.root.parent / "integration-review-sha"
+        git(self.root, "worktree", "add", str(integration_path), "enclaw/integration")
+
+        with self.assertRaisesRegex(PolicyError, "Reviewed commit does not match"):
+            integrate_task_branch(
+                policy,
+                "enclaw/task/task-review-sha",
+                "enclaw/integration",
+                review_approved=True,
+                reviewed_commit=reviewed_commit,
+            )
+        self.assertFalse((integration_path / "feature.txt").exists())
+
+    def test_review_approval_requires_a_commit_sha(self):
+        policy = dict(self.policy)
+        policy["validation"] = dict(self.policy["validation"])
+        policy["validation"]["require_independent_review"] = True
+        git(self.root, "branch", "enclaw/task/task-no-sha", "develop")
+        integration_path = self.root.parent / "integration-no-sha"
+        git(self.root, "worktree", "add", str(integration_path), "enclaw/integration")
+        with self.assertRaisesRegex(PolicyError, "reviewed_commit SHA is required"):
+            integrate_task_branch(
+                policy,
+                "enclaw/task/task-no-sha",
+                "enclaw/integration",
+                review_approved=True,
+            )
+
     def test_integration_runs_candidate_validation(self):
         task_path = create_worktree(self.policy, "task-5", "enclaw/task/task-5")
         (task_path / "feature.txt").write_text("done\n", encoding="utf-8")
