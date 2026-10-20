@@ -278,7 +278,14 @@ def run_one_task(
         policy = load_policy(project["policy_path"])
         limit = int(policy["limits"]["max_concurrent_agents"])
     except (PolicyError, OSError, ValueError) as exc:
-        raise RunnerError(f"Cannot load worker concurrency policy: {exc}") from exc
+        # Let the canonical worker claim and audit the failure instead of leaving
+        # a permanently queued task that a pool would repeatedly rediscover.
+        try:
+            return _run_one_task_claimed(
+                database_path, projects, actor=actor, task_id_override=task["task_id"]
+            )
+        except RunnerError as worker_exc:
+            raise RunnerError(f"Cannot load worker concurrency policy: {exc}; {worker_exc}") from exc
     lease = store.acquire_project_slot(task["project_id"], limit)
     if lease is None:
         return None
