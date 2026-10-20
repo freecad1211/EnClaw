@@ -102,7 +102,7 @@ Provider endpoint compatibility and quota behavior must be checked individually.
 ## Security limitations
 
 - Run EnClaw as a dedicated unprivileged OS user.
-- The core is not an OS sandbox. Validation commands run with the EnClaw process's permissions.
+- The core is not an OS sandbox. Agent/reviewer commands require a configured `runner.sandbox_command` prefix by default (`runner.require_sandbox`); validation commands still run with the EnClaw process's permissions.
 - Keep secrets out of policy files and Git.
 - Treat Discord messages, project instructions, and model output as untrusted.
 - Production deployment, protected-branch merging, OS/container sandboxing, authenticated reviewer attestations, role-specific agent scheduling, and trusted cost-budget accounting are not implemented in this milestone.
