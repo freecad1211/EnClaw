@@ -21,12 +21,14 @@
 - Role-specific agent scheduling (planner-created child tasks currently share the same coding/reviewer role configuration).
 - Automatic retry/resume orchestration and cost-budget accounting. Failed tasks can be retried explicitly within the project policy retry budget.
 - Authenticated review attestations and strong reviewer isolation. The reviewer is a separately configured CLI and must print `APPROVE`, but its identity is not cryptographically verified.
-- OS/container sandboxing for agent subprocesses.
+- A bundled OS/container sandbox. EnClaw only enforces the `runner.sandbox_command` prefix hook (see below); it does not ship a sandbox, and validation commands are not yet wrapped by it.
 - Automatic GitHub pull-request creation and production deployment.
 
 ## Important safety limitations
 
-The policy core controls EnClaw's own operations, but it is not an OS sandbox. The worker executes the configured agent CLI and validation commands with the EnClaw process's OS permissions. Use a dedicated unprivileged account, do not configure untrusted commands, and consider container isolation before overnight use. Protected-branch merges and deployment are intentionally excluded.
+Agent and reviewer commands are fail-closed on sandboxing: with the default `runner.require_sandbox: true`, a task fails before any worktree is created unless `runner.sandbox_command` (an argv prefix ending in `--`) is configured, and that prefix is prepended to both commands. Set `require_sandbox` to `false` only for trusted local development. Agent and reviewer subprocesses also run in their own process group (stopped as a group on cancel/timeout) and do not inherit `DISCORD_*` or `*_TOKEN`/`*_SECRET`/`*_PASSWORD` environment variables unless listed in `runner.env_passthrough`. Validation commands during integration are not yet sandboxed or environment-scrubbed.
+
+The policy core controls EnClaw's own operations, but it is not itself an OS sandbox. The worker executes the configured agent CLI and validation commands with the EnClaw process's OS permissions. Use a dedicated unprivileged account, do not configure untrusted commands, and consider container isolation before overnight use. Protected-branch merges and deployment are intentionally excluded.
 
 The provider module supports request/response formats for Ollama `/api/chat` and OpenAI-compatible `/chat/completions`, but this helper is not yet wired directly into the coding worker; the worker uses the configured coding CLI's own model configuration. Endpoint compatibility, model quality, and usage limits must be verified per provider. Project concurrency limits are enforced by SQLite worker slots across local processes. Cost budgets are still not enforced because configured external CLIs do not provide a uniform, trusted usage meter. Mark a remote endpoint as free with `OPENAI_COMPAT_IS_FREE=true` only after verifying its pricing.
 
