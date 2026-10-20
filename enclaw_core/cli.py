@@ -84,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     task_events.add_argument("task_id")
     task_events.add_argument("--db")
 
+    sub.add_parser("task-recover", help="Mark orphaned active tasks failed after worker-process loss").add_argument("--db")
+
     worker = sub.add_parser("worker-once", help="Execute at most one queued task using the project's configured agent and reviewer CLIs")
     worker.add_argument("--db")
     worker.add_argument("--projects", default="~/.config/enclaw/projects.json")
@@ -142,6 +144,9 @@ def main(argv: list[str] | None = None) -> int:
             ), indent=2))
         elif args.command == "task-events":
             print(json.dumps(_store(args.db).events(args.task_id), indent=2))
+        elif args.command == "task-recover":
+            recovered = _store(args.db).recover_orphaned_tasks()
+            print(json.dumps({"recovered": recovered, "count": len(recovered)}, indent=2))
         elif args.command == "orchestrate-once":
             registry_path = Path(args.projects).expanduser().resolve()
             registry = json.loads(registry_path.read_text(encoding="utf-8"))
