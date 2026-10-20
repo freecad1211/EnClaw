@@ -15,7 +15,7 @@ class ProviderSelectionTests(unittest.TestCase):
         providers = configured_providers(
             self.policy,
             {"OLLAMA_MODEL": "qwen2.5-coder", "OPENAI_COMPAT_BASE_URL": "https://api.example.invalid/v1",
-             "OPENAI_COMPAT_MODEL": "free-model"},
+             "OPENAI_COMPAT_MODEL": "free-model", "OPENAI_COMPAT_IS_FREE": "true"},
         )
         self.assertEqual([p.provider_id for p in providers], ["ollama"])
 
@@ -23,8 +23,10 @@ class ProviderSelectionTests(unittest.TestCase):
         env = {
             "OPENAI_COMPAT_BASE_URL": "https://api.example.invalid/v1",
             "OPENAI_COMPAT_MODEL": "free-model",
+            "OPENAI_COMPAT_IS_FREE": "true",
         }
         self.assertEqual(configured_providers(self.policy, env), [])
+        env["OPENAI_COMPAT_IS_FREE"] = "false"
         self.policy["providers"]["allow_paid_fallback"] = True
         self.assertEqual(
             [p.provider_id for p in configured_providers(self.policy, env)],
