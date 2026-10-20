@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import uuid
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -146,16 +147,27 @@ class Orchestrator:
                     (parent["task_id"], parent["project_id"]),
                 )
                 for ordinal, child in enumerate(children):
-                    child_task = self.store.create(
-                        parent["project_id"], child["title"],
-                        f"Parent task: {parent['task_id']}\nParent objective: {parent['title']}\n\n{child['description']}",
-                        actor=actor,
+                    child_id = uuid.uuid4().hex[:12]
+                    now = self.store._now_for_internal_use() if hasattr(self.store, "_now_for_internal_use") else None
+                    if now is None:
+                        from datetime import datetime, timezone
+                        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                    description = f"Parent task: {parent['task_id']}\nParent objective: {parent['title']}\n\n{child['description']}"
+                    db.execute(
+                        "INSERT INTO tasks(task_id, project_id, title, description, status, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, 'queued', ?, ?)",
+                        (child_id, parent["project_id"], child["title"], description, now, now),
                     )
+                    self.store._event(db, child_id, actor, "task.created", {
+                        "project_id": parent["project_id"], "title": child["title"],
+                        "parent_task_id": parent["task_id"], "ordinal": ordinal,
+                    })
                     db.execute(
                         "INSERT INTO task_group_children(parent_task_id, child_task_id, ordinal) VALUES (?, ?, ?)",
-                        (parent["task_id"], child_task["task_id"], ordinal),
+                        (parent["task_id"], child_id, ordinal),
                     )
-                    created.append(child_task)
+                    row = db.execute("SELECT * FROM tasks WHERE task_id=?", (child_id,)).fetchone()
+                    created.append(self.store._task(row))
                 db.commit()
             self.store.transition(
                 parent["task_id"], "running", actor=actor,
