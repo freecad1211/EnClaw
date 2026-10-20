@@ -59,6 +59,9 @@ python -m unittest discover -s enclaw_core -t . -v
 
 - \`task-create\`, \`task-list\`, \`task-show\`, \`task-cancel\`: 작업 큐 관리
 - \`task-retry\`: 정책의 재시도 한도 안에서 실패 작업 재등록
+- \`task-log\`: 작업의 최근 감사 이벤트와 세부 정보 확인
+- \`project-list\`: 등록된 프로젝트와 통합 브랜치 정책 확인
+- \`worker-status\`: 현재 Discord 프로세스의 워커 실행 상태와 마지막 오류 확인
 - \`orchestrate-once\`: 설정된 플래너로 작업을 제한된 하위 작업으로 분해
 - \`worker-once\`, \`worker-pool\`: 작업 워커 실행
 - \`orchestrate-refresh\`: 하위 작업 결과를 부모 작업 상태에 반영
@@ -67,7 +70,7 @@ python -m unittest discover -s enclaw_core -t . -v
 
 ## Discord 설정
 
-Discord 봇은 토큰과 운영자 ID가 설정된 경우에만 사용합니다. 비밀값은 소스 코드나 Git에 커밋하지 마세요. Discord 명령은 설정된 운영자 ID에 제한되어야 합니다.
+Discord 봇은 토큰과 운영자 ID가 설정된 경우에만 사용합니다. 비밀값은 소스 코드나 Git에 커밋하지 마세요. Discord 명령은 설정된 운영자 ID에 제한되어야 합니다. \`/project-list\`, \`/worker-status\`, \`/task-log\` 명령으로 프로젝트 정책 요약, 현재 프로세스의 워커 상태, 작업 감사 이벤트를 확인할 수 있습니다. 워커 실행 명령은 시작·완료·실패 결과를 비공개 후속 응답으로 보고합니다. 워커 상태는 현재 봇 프로세스 기준이며, 다른 프로세스의 워커 상태를 집계하는 전역 모니터링은 아닙니다.
 
 설치 및 설정 절차는 [Ubuntu 설정 가이드](docs/UBUNTU_SETUP.md)를 참고하세요. 현재 가이드는 개발용 체크아웃을 준비하기 위한 것이며, 운영 서버에 시스템 서비스로 설치하거나 자동 배포하는 절차가 아닙니다.
 
