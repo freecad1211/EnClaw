@@ -177,6 +177,30 @@ def build_bot() -> discord.Client:
         message = f"**{task['title']}**\nID: `{task_id}`\nProject: {task['project_id']}\nStatus: {task['status']}\n" + "\n".join(event_lines)
         await interaction.response.send_message(message[:1900], ephemeral=True)
 
+    @tree.command(name="task-retry", description="Retry a failed task within its project retry budget")
+    async def task_retry(interaction: discord.Interaction, task_id: str) -> None:
+        if not await authorized(interaction):
+            return
+        try:
+            store = TaskStore(_database_path())
+            task = store.get(task_id)
+            project = load_projects().get(task["project_id"])
+            if project is None:
+                raise TaskStoreError(f"Unknown project ID: {task['project_id']}")
+            policy = load_policy(project["policy_path"])
+            retried = store.retry_failed(
+                task_id,
+                max_retries=policy["limits"]["max_retries"],
+                actor=f"discord:{interaction.user.id}",
+            )
+        except (PolicyError, TaskStoreError, RuntimeError, OSError) as exc:
+            await interaction.response.send_message(f"Retry refused: {exc}"[:1900], ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"Task {retried['task_id']} requeued (retry {retried['attempts']}/{policy['limits']['max_retries']}).",
+            ephemeral=True,
+        )
+
     @tree.command(name="task-cancel", description="Request cancellation of a queued or active task")
     async def task_cancel(interaction: discord.Interaction, task_id: str) -> None:
         if not await authorized(interaction):
