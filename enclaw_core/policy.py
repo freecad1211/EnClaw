@@ -70,6 +70,11 @@ def default_policy(
             "allow_paid_fallback": False,
             "local_only": False,
         },
+        "runner": {
+            "agent_command": [],
+            "review_command": [],
+            "max_agent_minutes": 90,
+        },
         "limits": {
             "max_concurrent_agents": 3,
             "max_task_minutes": 90,
