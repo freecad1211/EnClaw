@@ -7,6 +7,7 @@ an independent review command in the project's policy, and never uses shell=True
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import threading
 import time
@@ -33,6 +34,67 @@ _DEPENDENCY_FILES = {
     "requirements.txt", "pyproject.toml", "poetry.lock", "uv.lock",
     "cargo.toml", "cargo.lock", "go.mod", "go.sum",
 }
+
+
+
+_SENSITIVE_ENV_SUFFIXES = ("_TOKEN", "_SECRET", "_PASSWORD")
+
+
+def _agent_env(runner: dict[str, Any] | None = None) -> dict[str, str]:
+    """Environment for agent/reviewer subprocesses without EnClaw's own secrets.
+
+    DISCORD_* and variables ending in _TOKEN/_SECRET/_PASSWORD are dropped unless the
+    project policy lists them in runner.env_passthrough.
+    """
+    passthrough = set((runner or {}).get("env_passthrough", []))
+    env: dict[str, str] = {}
+    for key, value in os.environ.items():
+        upper = key.upper()
+        sensitive = upper.startswith("DISCORD_") or upper.endswith(_SENSITIVE_ENV_SUFFIXES)
+        if sensitive and key not in passthrough:
+            continue
+        env[key] = value
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def _require_sandbox_configured(runner: dict[str, Any]) -> None:
+    if runner.get("require_sandbox", True) and not runner.get("sandbox_command"):
+        raise RunnerError(
+            "runner.require_sandbox is true but runner.sandbox_command is empty; "
+            "configure a sandbox prefix or explicitly set require_sandbox to false."
+        )
+
+
+def _apply_sandbox(runner: dict[str, Any], argv: Sequence[str], worktree: Path, task_id: str) -> list[str]:
+    _require_sandbox_configured(runner)
+    prefix = [
+        part.replace("{worktree}", str(worktree)).replace("{task_id}", task_id)
+        for part in runner.get("sandbox_command", [])
+    ]
+    return [*prefix, *argv]
+
+
+def _stop_process(process: subprocess.Popen, grace_seconds: int = 5) -> str:
+    """Terminate the whole process group (agent CLIs spawn children), then kill if needed."""
+    def send(sig: int) -> None:
+        try:
+            if hasattr(os, "killpg"):
+                os.killpg(process.pid, sig)
+            elif sig == signal.SIGTERM:
+                process.terminate()
+            else:
+                process.kill()
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    send(signal.SIGTERM)
+    try:
+        output, _ = process.communicate(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        send(getattr(signal, "SIGKILL", signal.SIGTERM))
+        output, _ = process.communicate()
+    return output or ""
 
 
 def _changed_paths(worktree: Path) -> list[str]:
@@ -88,6 +150,7 @@ def _run_bounded(
     timeout_seconds: int,
     store: TaskStore,
     task_id: str,
+    env: dict[str, str] | None = None,
 ) -> tuple[int, str]:
     process = subprocess.Popen(
         list(command),
@@ -95,10 +158,10 @@ def _run_bounded(
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        env=env if env is not None else _agent_env(),
+        start_new_session=True,
     )
     deadline = time.monotonic() + timeout_seconds
-    output = ""
     while True:
         try:
             output, _ = process.communicate(timeout=min(1.0, max(0.1, deadline - time.monotonic())))
@@ -107,24 +170,13 @@ def _run_bounded(
             try:
                 task = store.get(task_id)
             except TaskStoreError:
-                process.terminate()
-                process.wait(timeout=5)
+                _stop_process(process)
                 raise RunnerError("Task disappeared while its agent was running.")
             if task["cancellation_requested"]:
-                process.terminate()
-                try:
-                    output, _ = process.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    output, _ = process.communicate()
+                _stop_process(process)
                 raise RunnerError("Task cancellation requested; agent process stopped.")
             if time.monotonic() >= deadline:
-                process.terminate()
-                try:
-                    output, _ = process.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    output, _ = process.communicate()
+                _stop_process(process)
                 raise RunnerError(f"Agent command exceeded timeout of {timeout_seconds} seconds.")
 
 
@@ -180,9 +232,13 @@ def _run_one_task_claimed(
         review_command = runner.get("review_command", [])
         if not agent_command or not review_command:
             raise RunnerError("Both runner.agent_command and runner.review_command must be configured.")
+        _require_sandbox_configured(runner)  # fail before any worktree is created
 
-        branch = f"enclaw/task/{task_id}"
-        worktree = create_worktree(policy, task_id, branch)
+        # Retries get a fresh branch/worktree so a failed attempt cannot block the next one.
+        attempt = int(task.get("attempts", 0))
+        workspace_id = f"{task_id}-a{attempt}" if attempt else task_id
+        branch = f"enclaw/task/{workspace_id}"
+        worktree = create_worktree(policy, workspace_id, branch)
         task = store.transition(task_id, "running", actor=actor, details={"branch": branch, "worktree": str(worktree)})
         if task["cancellation_requested"]:
             store.transition(task_id, "cancelled", actor=actor, details={"reason": "cancelled before agent start"})
@@ -195,8 +251,8 @@ def _run_one_task_claimed(
         )
         if timeout <= 0:
             raise RunnerError("Agent timeout must be greater than zero.")
-        command = _format_command(agent_command, prompt, worktree, task_id)
-        return_code, output = _run_bounded(command, worktree, timeout, store, task_id)
+        command = _apply_sandbox(runner, _format_command(agent_command, prompt, worktree, task_id), worktree, task_id)
+        return_code, output = _run_bounded(command, worktree, timeout, store, task_id, env=_agent_env(runner))
         if return_code != 0:
             raise RunnerError(f"Agent command exited with status {return_code}:\n{output[-3000:]}")
         if _git(worktree, "rev-parse", "HEAD").stdout.strip() != starting_commit:
@@ -227,8 +283,8 @@ def _run_one_task_claimed(
             "Approve only if the change is acceptable; explain blocking findings after REJECT.\n\n"
             f"Task: {task['title']}\n{task['description']}\n\nCommit summary:\n{diff}"
         )
-        review_argv = _format_command(review_command, review_prompt, worktree, task_id)
-        review_code, review_output = _run_bounded(review_argv, worktree, timeout, store, task_id)
+        review_argv = _apply_sandbox(runner, _format_command(review_command, review_prompt, worktree, task_id), worktree, task_id)
+        review_code, review_output = _run_bounded(review_argv, worktree, timeout, store, task_id, env=_agent_env(runner))
         if review_code != 0:
             raise RunnerError(f"Reviewer command exited with status {review_code}:\n{review_output[-3000:]}")
         if _git(worktree, "rev-parse", "HEAD").stdout.strip() != commit_before_review or _changed_paths(worktree):
@@ -264,38 +320,41 @@ def run_one_task(
     *,
     actor: str = "enclaw-worker",
 ) -> dict[str, Any] | None:
-    """Run one task while enforcing the project's worker limit across processes."""
+    """Run one task while enforcing the project's worker limit across processes.
+
+    Queued tasks are considered oldest-first. A project whose worker slots are all busy
+    is skipped so it cannot starve queued tasks that belong to other projects.
+    """
     store = TaskStore(database_path)
     queued = [task for task in store.list(limit=200) if task["status"] == "queued"]
-    if not queued:
-        return None
-    task = queued[-1]
-    project = projects.get(task["project_id"])
-    if not project:
-        # Preserve the existing worker's auditable failure path for bad registry entries.
-        return _run_one_task_claimed(database_path, projects, actor=actor, task_id_override=task["task_id"])
-    try:
-        policy = load_policy(project["policy_path"])
-        limit = int(policy["limits"]["max_concurrent_agents"])
-    except (PolicyError, OSError, ValueError) as exc:
-        # Let the canonical worker claim and audit the failure instead of leaving
-        # a permanently queued task that a pool would repeatedly rediscover.
+    for task in reversed(queued):  # list() is newest-first
+        project = projects.get(task["project_id"])
+        if not project:
+            # Preserve the existing worker's auditable failure path for bad registry entries.
+            return _run_one_task_claimed(database_path, projects, actor=actor, task_id_override=task["task_id"])
+        try:
+            policy = load_policy(project["policy_path"])
+            limit = int(policy["limits"]["max_concurrent_agents"])
+        except (PolicyError, OSError, ValueError) as exc:
+            # Let the canonical worker claim and audit the failure instead of leaving
+            # a permanently queued task that a pool would repeatedly rediscover.
+            try:
+                return _run_one_task_claimed(
+                    database_path, projects, actor=actor, task_id_override=task["task_id"]
+                )
+            except RunnerError as worker_exc:
+                raise RunnerError(f"Cannot load worker concurrency policy: {exc}; {worker_exc}") from exc
+        lease_seconds = max(3600, int(policy["limits"]["max_task_minutes"]) * 60 + 900)
+        lease = store.acquire_project_slot(task["project_id"], limit, lease_seconds=lease_seconds)
+        if lease is None:
+            continue  # this project is saturated; try the next queued task
         try:
             return _run_one_task_claimed(
                 database_path, projects, actor=actor, task_id_override=task["task_id"]
             )
-        except RunnerError as worker_exc:
-            raise RunnerError(f"Cannot load worker concurrency policy: {exc}; {worker_exc}") from exc
-    lease_seconds = max(3600, int(policy["limits"]["max_task_minutes"]) * 60 + 900)
-    lease = store.acquire_project_slot(task["project_id"], limit, lease_seconds=lease_seconds)
-    if lease is None:
-        return None
-    try:
-        return _run_one_task_claimed(
-            database_path, projects, actor=actor, task_id_override=task["task_id"]
-        )
-    finally:
-        store.release_project_slot(lease)
+        finally:
+            store.release_project_slot(lease)
+    return None
 
 def run_worker_pool(
     database_path: str | Path,
