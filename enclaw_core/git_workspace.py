@@ -119,6 +119,7 @@ def integrate_task_branch(
     source_branch: str,
     target_branch: str,
     review_approved: bool = False,
+    reviewed_commit: str | None = None,
 ) -> str:
     require_capability(policy, "integrate_task_branches")
     require_capability(policy, "run_validation")
@@ -138,8 +139,11 @@ def integrate_task_branch(
         raise PolicyError("Source and target must be distinct non-protected branches.")
     if not any(source_branch.startswith(p) for p in git_policy["allowed_task_branch_prefixes"]):
         raise PolicyError("Source branch is not an allowed task branch.")
-    if policy["validation"]["require_independent_review"] and not review_approved:
-        raise PolicyError("Independent review approval is required by project policy.")
+    if policy["validation"]["require_independent_review"]:
+        if not review_approved:
+            raise PolicyError("Independent review approval is required by project policy.")
+        if not isinstance(reviewed_commit, str) or not re.fullmatch(r"[0-9a-f]{40,64}", reviewed_commit):
+            raise PolicyError("A valid reviewed_commit SHA is required for independent review approval.")
 
     repo = _repo_root(policy["project"]["repo_root"])
     if not policy["validation"]["commands"]:
@@ -148,6 +152,12 @@ def integrate_task_branch(
         raise GitOperationError(f"Source branch does not exist locally: {source_branch}")
     if not _branch_exists(repo, target_branch):
         raise GitOperationError(f"Integration branch does not exist locally: {target_branch}")
+    if policy["validation"]["require_independent_review"]:
+        current_source_commit = _git(repo, "rev-parse", f"refs/heads/{source_branch}").stdout.strip()
+        if current_source_commit != reviewed_commit:
+            raise PolicyError(
+                "Reviewed commit does not match the current source branch HEAD; review must be repeated."
+            )
 
     # Do not proceed if the primary checkout has uncommitted changes.
     _ensure_clean(repo)
