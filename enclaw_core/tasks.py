@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -86,6 +88,14 @@ class TaskStore:
                 );
                 CREATE INDEX IF NOT EXISTS task_events_task
                     ON task_events(task_id, event_id);
+                CREATE TABLE IF NOT EXISTS worker_leases (
+                    lease_id TEXT PRIMARY KEY,
+                    project_id TEXT NOT NULL,
+                    pid INTEGER NOT NULL,
+                    acquired_epoch REAL NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS worker_leases_project
+                    ON worker_leases(project_id, acquired_epoch);
             """)
 
     @staticmethod
@@ -184,6 +194,46 @@ class TaskStore:
             updated = db.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
             db.commit()
         return self._task(updated)
+
+    def acquire_project_slot(self, project_id: str, limit: int, *, lease_seconds: int = 7200) -> str | None:
+        """Atomically reserve one project worker slot across processes sharing this SQLite DB."""
+        if not project_id or not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
+            raise TaskStoreError("project_id and a non-negative worker limit are required.")
+        if limit == 0:
+            return None
+        now = time.time()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            stale = db.execute(
+                "SELECT lease_id, pid, acquired_epoch FROM worker_leases"
+            ).fetchall()
+            for lease in stale:
+                alive = True
+                try:
+                    os.kill(int(lease["pid"]), 0)
+                except ProcessLookupError:
+                    alive = False
+                except PermissionError:
+                    alive = True
+                if not alive or now - float(lease["acquired_epoch"]) > lease_seconds:
+                    db.execute("DELETE FROM worker_leases WHERE lease_id=?", (lease["lease_id"],))
+            active = db.execute(
+                "SELECT COUNT(*) FROM worker_leases WHERE project_id=?", (project_id,)
+            ).fetchone()[0]
+            if active >= limit:
+                db.rollback()
+                return None
+            token = uuid.uuid4().hex
+            db.execute(
+                "INSERT INTO worker_leases(lease_id, project_id, pid, acquired_epoch) VALUES (?, ?, ?, ?)",
+                (token, project_id, os.getpid(), now),
+            )
+            db.commit()
+        return token
+
+    def release_project_slot(self, lease_id: str) -> None:
+        with self._connect() as db:
+            db.execute("DELETE FROM worker_leases WHERE lease_id=?", (lease_id,))
 
     def retry_failed(self, task_id: str, *, max_retries: int, actor: str = "operator") -> dict[str, Any]:
         """Requeue a failed task explicitly, within the caller-supplied project retry budget."""
