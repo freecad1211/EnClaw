@@ -92,11 +92,15 @@ class TaskStore:
                     lease_id TEXT PRIMARY KEY,
                     project_id TEXT NOT NULL,
                     pid INTEGER NOT NULL,
-                    acquired_epoch REAL NOT NULL
+                    acquired_epoch REAL NOT NULL,
+                    expires_epoch REAL NOT NULL DEFAULT 0
                 );
                 CREATE INDEX IF NOT EXISTS worker_leases_project
                     ON worker_leases(project_id, acquired_epoch);
             """)
+            lease_columns = {row[1] for row in db.execute("PRAGMA table_info(worker_leases)").fetchall()}
+            if "expires_epoch" not in lease_columns:
+                db.execute("ALTER TABLE worker_leases ADD COLUMN expires_epoch REAL NOT NULL DEFAULT 0")
 
     @staticmethod
     def _task(row: sqlite3.Row) -> dict[str, Any]:
@@ -205,7 +209,7 @@ class TaskStore:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             stale = db.execute(
-                "SELECT lease_id, pid, acquired_epoch FROM worker_leases"
+                "SELECT lease_id, pid, expires_epoch FROM worker_leases"
             ).fetchall()
             for lease in stale:
                 alive = True
@@ -215,7 +219,7 @@ class TaskStore:
                     alive = False
                 except PermissionError:
                     alive = True
-                if not alive or now - float(lease["acquired_epoch"]) > lease_seconds:
+                if not alive or now > float(lease["expires_epoch"]):
                     db.execute("DELETE FROM worker_leases WHERE lease_id=?", (lease["lease_id"],))
             active = db.execute(
                 "SELECT COUNT(*) FROM worker_leases WHERE project_id=?", (project_id,)
@@ -225,8 +229,8 @@ class TaskStore:
                 return None
             token = uuid.uuid4().hex
             db.execute(
-                "INSERT INTO worker_leases(lease_id, project_id, pid, acquired_epoch) VALUES (?, ?, ?, ?)",
-                (token, project_id, os.getpid(), now),
+                "INSERT INTO worker_leases(lease_id, project_id, pid, acquired_epoch, expires_epoch) VALUES (?, ?, ?, ?, ?)",
+                (token, project_id, os.getpid(), now, now + lease_seconds),
             )
             db.commit()
         return token
