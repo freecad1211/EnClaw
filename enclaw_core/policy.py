@@ -149,6 +149,9 @@ def validate_policy(policy: Any) -> dict[str, Any]:
     runner = policy.get("runner")
     if not isinstance(runner, dict):
         raise PolicyError("runner must be an object.")
+    # Backward-compatible defaults for policies created before planner support.
+    runner.setdefault("planner_command", [])
+    runner.setdefault("max_planner_seconds", 180)
     for key in ("agent_command", "review_command", "planner_command"):
         command = runner.get(key)
         if not isinstance(command, list) or not all(isinstance(part, str) and part for part in command):
