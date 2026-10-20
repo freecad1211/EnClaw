@@ -75,6 +75,11 @@ def main(argv: list[str] | None = None) -> int:
     task_cancel.add_argument("task_id")
     task_cancel.add_argument("--db")
 
+    task_retry = sub.add_parser("task-retry", help="Retry a failed task within its project retry budget")
+    task_retry.add_argument("task_id")
+    task_retry.add_argument("--policy", required=True)
+    task_retry.add_argument("--db")
+
     task_events = sub.add_parser("task-events", help="Print task audit events")
     task_events.add_argument("task_id")
     task_events.add_argument("--db")
@@ -124,6 +129,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"task": store.get(args.task_id), "events": store.events(args.task_id)}, indent=2))
         elif args.command == "task-cancel":
             print(json.dumps(_store(args.db).request_cancel(args.task_id), indent=2))
+        elif args.command == "task-retry":
+            policy = load_policy(args.policy)
+            print(json.dumps(_store(args.db).retry_failed(
+                args.task_id, max_retries=policy["limits"]["max_retries"]
+            ), indent=2))
         elif args.command == "task-events":
             print(json.dumps(_store(args.db).events(args.task_id), indent=2))
         elif args.command == "orchestrate-once":
