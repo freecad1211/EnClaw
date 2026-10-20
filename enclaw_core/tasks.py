@@ -155,12 +155,12 @@ class TaskStore:
         with self._connect() as db:
             if project_id:
                 rows = db.execute(
-                    "SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
+                    "SELECT * FROM tasks WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?",
                     (project_id, limit),
                 ).fetchall()
             else:
                 rows = db.execute(
-                    "SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?", (limit,)
+                    "SELECT * FROM tasks ORDER BY created_at DESC, rowid DESC LIMIT ?", (limit,)
                 ).fetchall()
         return [self._task(row) for row in rows]
 
