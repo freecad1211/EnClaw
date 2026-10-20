@@ -10,12 +10,15 @@
 - Candidate merge in a temporary worktree, validation commands executed as argument arrays without a shell, then fast-forward-only integration.
 - Local-first provider selection for Ollama and OpenAI-compatible chat endpoints.
 - Explicit opt-in for remote endpoints declared free; paid/unknown remote fallback is disabled by default.
-- SQLite task queue with explicit lifecycle transitions, cooperative cancellation requests, and append-only audit events.\n- CLI commands to enqueue, list, inspect, cancel, and audit tasks.\n- Unit and disposable-repository integration tests.
+- SQLite task queue with explicit lifecycle transitions, cooperative cancellation requests, and append-only audit events.
+- CLI commands to enqueue, list, inspect, cancel, and audit tasks.
+- Unit and disposable-repository integration tests.
 - GitHub Actions workflow to run the core tests.
 
 ## Not implemented yet
 
-- Discord task-control commands exist for queue/list/show/cancel and policy inspection. No agent worker is connected yet.\n- Interactive approval workflow with verified review identity.
+- Discord slash commands support task queue/list/show/cancel and project-policy inspection; no agent worker is connected yet.
+- Interactive approval workflow with verified review identity.
 - Actual multi-agent orchestration, role scheduling, and worker cancellation handling.
 - Worker execution and resume/retry orchestration; task metadata and event history are persisted, but no worker consumes the queue yet.
 - Container/sandbox enforcement for arbitrary agent tools.
