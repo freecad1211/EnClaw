@@ -20,6 +20,7 @@ except ImportError as exc:  # pragma: no cover - exercised in install environmen
 
 from .policy import PolicyError, load_policy
 from .runner import run_one_task
+from .orchestrator import Orchestrator, OrchestrationError
 from .tasks import TaskStore, TaskStoreError
 
 
@@ -218,6 +219,49 @@ def build_bot() -> discord.Client:
                     print(f"EnClaw worker stopped safely: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
 
         asyncio.create_task(background_worker())
+
+    @tree.command(name="orchestrate-once", description="Decompose one queued task into bounded child tasks")
+    @app_commands.describe(max_children="Maximum child tasks to allow (1-16)")
+    async def orchestrate_once(interaction: discord.Interaction, max_children: app_commands.Range[int, 1, 16] = 8) -> None:
+        if not await authorized(interaction):
+            return
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            result = await asyncio.to_thread(
+                Orchestrator(_database_path()).decompose_one,
+                load_projects(),
+                max_children=max_children,
+                actor=f"discord-planner:{interaction.user.id}",
+            )
+        except (OrchestrationError, PolicyError, TaskStoreError, RuntimeError, OSError) as exc:
+            await interaction.followup.send(f"Planning stopped safely: {exc}"[:1900], ephemeral=True)
+            return
+        if result is None:
+            await interaction.followup.send("No root task is waiting to be planned.", ephemeral=True)
+            return
+        await interaction.followup.send(
+            f"Parent {result['parent']} planned into {len(result['children'])} child tasks: "
+            + ", ".join(result["children"]),
+            ephemeral=True,
+        )
+
+    @tree.command(name="orchestrate-refresh", description="Update parent task status from child task results")
+    async def orchestrate_refresh(interaction: discord.Interaction) -> None:
+        if not await authorized(interaction):
+            return
+        try:
+            results = await asyncio.to_thread(
+                Orchestrator(_database_path()).refresh_groups,
+                actor=f"discord-orchestrator:{interaction.user.id}",
+            )
+        except (OrchestrationError, PolicyError, TaskStoreError, RuntimeError, OSError) as exc:
+            await interaction.response.send_message(f"Aggregation stopped safely: {exc}"[:1900], ephemeral=True)
+            return
+        if not results:
+            await interaction.response.send_message("No parent task groups are ready to aggregate.", ephemeral=True)
+            return
+        summary = "\n".join(f"{item['parent_task_id']} -> {item['state']} ({len(item['children'])} children)" for item in results)
+        await interaction.response.send_message(summary[:1900], ephemeral=True)
 
     @tree.command(name="project-policy", description="Show a project's policy summary")
     async def project_policy(interaction: discord.Interaction, project_id: str) -> None:
