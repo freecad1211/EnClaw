@@ -69,7 +69,7 @@ cp config/projects.example.json ~/.config/enclaw/projects.json
 
 모델 ID와 CLI 인자를 추측하지 말고 설치된 도구의 도움말로 확인하세요. 무료 API 여부는 공급자의 실제 가격과 사용 한도로 검증해야 합니다.
 
-중요: 정책의 sandbox_command 및 require_sandbox 설정만으로 OS 수준 격리가 자동 보장된다고 가정하지 마세요. 워커의 실제 격리 동작이 검증되기 전에는 실제 코드베이스에서 실행하지 말고, 별도 테스트 저장소에서 먼저 확인하세요.
+중요: EnClaw은 자체 OS/컨테이너 샌드박스를 제공하지 않습니다. 기본값 `runner.require_sandbox: true`에서는 `runner.sandbox_command`가 비어 있으면 에이전트 실행을 거부합니다. 이 설정은 지정된 명령 접두사를 붙이는 기능일 뿐, 접두사 자체가 안전한 격리를 보장하지는 않습니다. 신뢰할 수 있는 격리 도구로 설정하고 별도 테스트 저장소에서 검증하세요. `require_sandbox: false`는 신뢰할 수 있는 로컬 개발에서만 사용하세요.
 
 ## 7. CLI 작업 흐름
 
