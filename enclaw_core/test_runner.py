@@ -74,6 +74,7 @@ class RunnerSafetyTests(unittest.TestCase):
             policy = default_policy("sample", str(root), "develop", "enclaw/integration")
             policy["project"]["workspace_root"] = str(Path(temporary) / "worktrees")
             policy["validation"]["require_independent_review"] = True
+            policy["runner"]["require_sandbox"] = False  # explicit opt-out for this test
             policy["validation"]["commands"] = [[
                 "python3", "-c", "from pathlib import Path; assert Path('generated.txt').read_text() == 'ok'"
             ]]
