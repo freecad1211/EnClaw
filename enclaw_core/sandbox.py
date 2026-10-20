@@ -66,7 +66,7 @@ def build_bwrap_argv(worktree: Path, repo_root: Path, command: Sequence[str]) ->
         bwrap, "--die-with-parent", "--new-session", "--unshare-all",
         "--ro-bind", "/", "/",
         "--tmpfs", "/home", "--tmpfs", "/root", "--tmpfs", "/tmp",
-        "--dev", "/dev", "--proc", "/proc", "--tmpfs", "/run/user",
+        "--dev", "/dev", "--proc", "/proc",
     ]
     # Host home directories and temporary files are hidden. The worktree is the
     # only writable host mount; shared Git metadata is read-only.
