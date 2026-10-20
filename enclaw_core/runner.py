@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import os
 import subprocess
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -286,3 +288,45 @@ def run_one_task(
         )
     finally:
         store.release_project_slot(lease)
+
+def run_worker_pool(
+    database_path: str | Path,
+    projects: dict[str, dict[str, Any]],
+    *,
+    workers: int = 4,
+    idle_seconds: int = 5,
+    actor: str = "enclaw-pool",
+) -> list[dict[str, Any]]:
+    """Run a bounded local worker pool; per-project SQLite slots remain authoritative."""
+    if not 1 <= workers <= 16:
+        raise RunnerError("workers must be between 1 and 16.")
+    if not 1 <= idle_seconds <= 300:
+        raise RunnerError("idle_seconds must be between 1 and 300.")
+    results: list[dict[str, Any]] = []
+    results_lock = threading.Lock()
+
+    def worker(index: int) -> None:
+        idle_since = time.monotonic()
+        while time.monotonic() - idle_since < idle_seconds:
+            try:
+                result = run_one_task(database_path, projects, actor=f"{actor}:{index}")
+            except RunnerError as exc:
+                with results_lock:
+                    results.append({"status": "failed", "error": str(exc)})
+                idle_since = time.monotonic()
+                continue
+            if result is not None:
+                with results_lock:
+                    results.append(result)
+                idle_since = time.monotonic()
+                continue
+            store = TaskStore(database_path)
+            if not any(task["status"] == "queued" for task in store.list(limit=200)):
+                return
+            time.sleep(0.25)
+
+    with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="enclaw-worker") as pool:
+        futures = [pool.submit(worker, index) for index in range(workers)]
+        for future in futures:
+            future.result()
+    return results
