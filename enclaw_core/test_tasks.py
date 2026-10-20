@@ -47,6 +47,32 @@ class TaskStoreTests(unittest.TestCase):
         with self.assertRaises(TaskStoreError):
             self.store.request_cancel(self.task["task_id"])
 
+    def test_orphaned_active_task_is_marked_failed_when_worker_is_gone(self):
+        self.store.transition(self.task["task_id"], "planning", actor="worker")
+        # No worker lease exists, so this active task has no live owner.
+        recovered = self.store.recover_orphaned_tasks()
+        self.assertEqual(len(recovered), 1)
+        self.assertEqual(recovered[0]["task_id"], self.task["task_id"])
+        self.assertEqual(recovered[0]["status"], "failed")
+        event = self.store.events(self.task["task_id"])[-1]
+        self.assertEqual(event["event_type"], "task.recovered_orphaned")
+        self.assertIn("inspect", event["details"]["reason"])
+
+    def test_orphan_recovery_preserves_tasks_with_live_project_lease(self):
+        lease = self.store.acquire_project_slot("relune", 1)
+        self.assertIsNotNone(lease)
+        self.store.transition(self.task["task_id"], "planning", actor="worker")
+        self.assertEqual(self.store.recover_orphaned_tasks(), [])
+        self.assertEqual(self.store.get(self.task["task_id"])["status"], "planning")
+        self.store.release_project_slot(lease)
+
+    def test_orphan_recovery_does_not_change_human_approval_tasks(self):
+        self.store.transition(self.task["task_id"], "planning", actor="worker")
+        self.store.transition(self.task["task_id"], "running", actor="worker")
+        self.store.transition(self.task["task_id"], "awaiting_approval", actor="worker")
+        self.assertEqual(self.store.recover_orphaned_tasks(), [])
+        self.assertEqual(self.store.get(self.task["task_id"])["status"], "awaiting_approval")
+
     def test_project_worker_slots_enforce_capacity_and_release(self):
         first = self.store.acquire_project_slot("relune", 1)
         self.assertIsNotNone(first)
