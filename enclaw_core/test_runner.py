@@ -3,7 +3,7 @@
 import unittest
 from pathlib import Path
 
-from .runner import RunnerError, _check_changed_paths, _format_command
+from .runner import RunnerError, _check_changed_paths, _format_command, run_worker_pool
 
 
 class RunnerSafetyTests(unittest.TestCase):
@@ -29,6 +29,16 @@ class RunnerSafetyTests(unittest.TestCase):
 
     def test_normal_source_paths_are_allowed(self):
         _check_changed_paths(["src/index.ts", "tests/test_core.py", "README.md"])
+
+    def test_worker_pool_is_bounded_and_exits_when_queue_is_empty(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as temporary:
+            results = run_worker_pool(Path(temporary) / "tasks.sqlite3", {}, workers=2, idle_seconds=1)
+            self.assertEqual(results, [])
+        with self.assertRaises(RunnerError):
+            run_worker_pool(":memory:", {}, workers=17, idle_seconds=1)
 
     def test_one_task_runs_reviews_and_integrates_only_after_validation(self):
         import json
