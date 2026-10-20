@@ -66,6 +66,7 @@ python3 -m enclaw_core.cli task-show TASK_ID
 python3 -m enclaw_core.cli task-cancel TASK_ID
 python3 -m enclaw_core.cli task-retry TASK_ID --policy /path/to/project/.enclaw/policy.json
 python3 -m enclaw_core.cli task-events TASK_ID
+python3 -m enclaw_core.cli task-recover
 ```
 
 The database defaults to `~/.local/state/enclaw/tasks.sqlite3`. Set `ENCLAW_DB_PATH` or pass `--db` to choose a location. Cancellation is recorded as a request and the configured worker checks it while the agent process is running.
