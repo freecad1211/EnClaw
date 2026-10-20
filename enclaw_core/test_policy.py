@@ -15,6 +15,14 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(normalized["git"]["integration_branch"], "enclaw/integration")
         self.assertFalse(normalized["permissions"]["deploy"])
 
+    def test_older_policy_gets_safe_planner_defaults(self):
+        policy = default_policy("sample", str(Path.cwd()))
+        del policy["runner"]["planner_command"]
+        del policy["runner"]["max_planner_seconds"]
+        normalized = validate_policy(policy)
+        self.assertEqual(normalized["runner"]["planner_command"], [])
+        self.assertEqual(normalized["runner"]["max_planner_seconds"], 180)
+
     def test_missing_capability_is_denied(self):
         policy = default_policy("sample", str(Path.cwd()))
         del policy["permissions"]["deploy"]
