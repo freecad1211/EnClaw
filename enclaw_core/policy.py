@@ -74,6 +74,8 @@ def default_policy(
             "agent_command": [],
             "review_command": [],
             "planner_command": [],
+            "sandbox_command": [],
+            "require_sandbox": True,
             "max_agent_minutes": 90,
             "max_planner_seconds": 180,
         },
@@ -152,12 +154,22 @@ def validate_policy(policy: Any) -> dict[str, Any]:
     # Backward-compatible defaults for policies created before planner support.
     runner.setdefault("planner_command", [])
     runner.setdefault("max_planner_seconds", 180)
+    # Workers fail closed unless an OS/container sandbox prefix is configured.
+    runner.setdefault("sandbox_command", [])
+    runner.setdefault("require_sandbox", True)
     for key in ("agent_command", "review_command", "planner_command"):
         command = runner.get(key)
         if not isinstance(command, list) or not all(isinstance(part, str) and part for part in command):
             raise PolicyError(f"runner.{key} must be an array of non-empty strings (or an empty array to disable workers).")
         if command and not any("{prompt}" in part for part in command):
             raise PolicyError(f"runner.{key} must include the {{prompt}} placeholder.")
+    sandbox_command = runner.get("sandbox_command")
+    if not isinstance(sandbox_command, list) or not all(isinstance(part, str) and part for part in sandbox_command):
+        raise PolicyError("runner.sandbox_command must be an array of non-empty strings.")
+    if sandbox_command and (sandbox_command[-1] != "--" or any("{prompt}" in part for part in sandbox_command)):
+        raise PolicyError("runner.sandbox_command must end with '--' and must not contain {prompt}.")
+    if not isinstance(runner.get("require_sandbox"), bool):
+        raise PolicyError("runner.require_sandbox must be a boolean.")
     if runner.get("planner_command") and runner.get("planner_command") == runner.get("agent_command"):
         raise PolicyError("runner.planner_command must differ from runner.agent_command.")
     if runner.get("planner_command") and runner.get("planner_command") == runner.get("review_command"):
