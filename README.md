@@ -53,3 +53,18 @@ eyejoker/ (이 레포의 추가 payload — 나노클로 트리 밖 커스텀)
 ## 잔존 v0 유산
 
 - `src/codex-usage-collector.ts` — 읽기 전용 Codex usage 수집기. usage 대시보드 부활 시 재사용.
+
+
+---
+
+## EnClaw custom development core
+
+The `feature/project-policy-engine` branch adds an initial project-aware automation core alongside the original EJClaw carry files.
+
+- Core documentation: [enclaw_core/README.md](enclaw_core/README.md)
+- Implementation status: [docs/IMPLEMENTATION_STATUS.md](docs/IMPLEMENTATION_STATUS.md)
+- Project policy engine and Git worktree safeguards
+- Local-first Ollama and OpenAI-compatible provider selection
+- GitHub Actions test workflow
+
+This is not yet a complete autonomous multi-agent product: Discord command handling, agent scheduling, durable task history, and verified independent review remain future milestones. See the implementation status before deploying.
