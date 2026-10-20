@@ -2,40 +2,38 @@
 
 ## Implemented in the current feature branch
 
-- Standalone, dependency-free Python policy core.
+- Standalone Python package under `enclaw_core/`; Python standard library only.
 - Per-project JSON policy generation, validation, and inspection.
 - Fail-closed capability checks.
 - Isolated Git worktree creation for allowlisted task-branch prefixes.
 - Guarded task-branch integration: only the configured integration branch is accepted as target.
 - Candidate merge in a temporary worktree, validation commands executed as argument arrays without a shell, then fast-forward-only integration.
+- Local-first provider selection for Ollama and OpenAI-compatible chat endpoints.
+- Explicit opt-in for remote endpoints declared free; paid/unknown remote fallback is disabled by default.
 - Unit and disposable-repository integration tests.
+- GitHub Actions workflow to run the core tests.
 
 ## Not implemented yet
 
 - Discord bot commands and interactive approvals.
 - Actual multi-agent orchestration and role scheduling.
-- Ollama and free API provider adapters.
-- Durable task queue, database-backed audit history, cancellation/resume.
+- Persistent task queue, database-backed audit history, cancellation/resume.
 - Container/sandbox enforcement for arbitrary agent tools.
-- Independent model-based code review implementation.
-- GitHub pull request workflow and CI verification.
+- Independent model-based code review implementation. The current review flag is an operator assertion, not a verified reviewer identity.
+- GitHub pull request workflow.
 - Production deployment.
 
-## Important safety limitation
+## Important safety limitations
 
-The core policy controls EnClaw's own operations, but it is not an OS sandbox. Validation commands run with the permissions of the EnClaw process. Run it as an unprivileged dedicated user and do not configure untrusted commands. Production deployment and protected-branch merges are intentionally outside this first core milestone.
+The policy core controls EnClaw's own operations, but it is not an OS sandbox. Validation commands run with the permissions of the EnClaw process. Run it as an unprivileged dedicated user and do not configure untrusted commands. Protected-branch merges and deployment are intentionally not part of this milestone.
+
+The provider module supports request/response formats for Ollama `/api/chat` and OpenAI-compatible `/chat/completions`. Endpoint compatibility, model quality, and usage limits still need to be verified per provider. A user must explicitly mark a remote endpoint as free with `OPENAI_COMPAT_IS_FREE=true`; do not use this setting unless the endpoint's pricing is known.
 
 ## Local verification
 
 From the repository root:
 
 ```bash
-python3 -m unittest enclaw-core.test_policy enclaw-core.test_git_workspace
-```
-
-Because Python package names cannot contain hyphens, the implementation directory is renamed to `enclaw_core` before release. Until then, run tests from the directory directly:
-
-```bash
-cd enclaw-core
-python3 -m unittest test_policy test_git_workspace
+python3 -m compileall -q enclaw_core
+python3 -m unittest discover -s enclaw_core -t . -v
 ```
