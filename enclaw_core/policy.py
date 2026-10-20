@@ -153,6 +153,8 @@ def validate_policy(policy: Any) -> dict[str, Any]:
             raise PolicyError(f"runner.{key} must be an array of non-empty strings (or an empty array to disable workers).")
         if command and not any("{prompt}" in part for part in command):
             raise PolicyError(f"runner.{key} must include the {{prompt}} placeholder.")
+    if runner.get("agent_command") and runner.get("review_command") and runner["agent_command"] == runner["review_command"]:
+        raise PolicyError("runner.agent_command and runner.review_command must be different for independent review.")
     agent_minutes = runner.get("max_agent_minutes")
     if not isinstance(agent_minutes, int) or isinstance(agent_minutes, bool) or agent_minutes < 1:
         raise PolicyError("runner.max_agent_minutes must be a positive integer.")
