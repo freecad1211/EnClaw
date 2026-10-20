@@ -121,6 +121,7 @@ def integrate_task_branch(
     review_approved: bool = False,
 ) -> str:
     require_capability(policy, "integrate_task_branches")
+    require_capability(policy, "run_validation")
     git_policy = policy["git"]
     integration = git_policy["integration_branch"]
     protected = set(git_policy["protected_branches"])
@@ -148,7 +149,6 @@ def integrate_task_branch(
 
     # Do not proceed if the primary checkout has uncommitted changes.
     _ensure_clean(repo)
-    _git(repo, "fetch", "--quiet", check=False)
     candidate_branch = f"enclaw/check/{uuid.uuid4().hex[:12]}"
     candidate_path = Path(tempfile.mkdtemp(prefix="enclaw-candidate-"))
     candidate_path.rmdir()
