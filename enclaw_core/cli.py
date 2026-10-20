@@ -11,6 +11,7 @@ from pathlib import Path
 from .git_workspace import create_worktree, integrate_task_branch
 from .policy import PolicyError, default_policy, load_policy, validate_policy
 from .tasks import TaskStore, TaskStoreError
+from .runner import run_one_task, RunnerError
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -77,6 +78,10 @@ def main(argv: list[str] | None = None) -> int:
     task_events.add_argument("task_id")
     task_events.add_argument("--db")
 
+    worker = sub.add_parser("worker-once", help="Execute at most one queued task using the project's configured agent and reviewer CLIs")
+    worker.add_argument("--db")
+    worker.add_argument("--projects", default="~/.config/enclaw/projects.json")
+
     args = parser.parse_args(argv)
     try:
         if args.command == "init-project":
@@ -112,8 +117,23 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(_store(args.db).request_cancel(args.task_id), indent=2))
         elif args.command == "task-events":
             print(json.dumps(_store(args.db).events(args.task_id), indent=2))
+        elif args.command == "worker-once":
+            registry_path = Path(args.projects).expanduser().resolve()
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            entries = registry.get("projects") if isinstance(registry, dict) else None
+            if not isinstance(entries, list):
+                raise PolicyError("Project registry must contain a 'projects' array.")
+            projects = {}
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not isinstance(entry.get("policy_path"), str):
+                    raise PolicyError("Every project registry entry requires string id and policy_path.")
+                if entry["id"] in projects:
+                    raise PolicyError(f"Duplicate project id in registry: {entry['id']}")
+                projects[entry["id"]] = entry
+            result = run_one_task(args.db or os.environ.get("ENCLAW_DB_PATH", "~/.local/state/enclaw/tasks.sqlite3"), projects)
+            print(json.dumps(result, indent=2) if result else "No queued task was available.")
         return 0
-    except (PolicyError, TaskStoreError, RuntimeError, OSError) as exc:
+    except (PolicyError, TaskStoreError, RunnerError, RuntimeError, OSError, json.JSONDecodeError) as exc:
         print(f"EnClaw stopped safely: {exc}", file=sys.stderr)
         return 2
 
