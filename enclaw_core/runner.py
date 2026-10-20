@@ -55,6 +55,8 @@ def _check_changed_paths(paths: Sequence[str], *, allow_dependencies: bool = Fal
             parts & _FORBIDDEN_PATH_PARTS
             or name == ".env"
             or name.startswith(".env.")
+            or "secret" in name
+            or "credential" in name
             or name.endswith(tuple(_FORBIDDEN_SUFFIXES))
             or path.startswith(".enclaw/")
             or path == ".git"
@@ -174,6 +176,9 @@ def run_one_task(
         branch = f"enclaw/task/{task_id}"
         worktree = create_worktree(policy, task_id, branch)
         task = store.transition(task_id, "running", actor=actor, details={"branch": branch, "worktree": str(worktree)})
+        if task["cancellation_requested"]:
+            store.transition(task_id, "cancelled", actor=actor, details={"reason": "cancelled before agent start"})
+            return store.get(task_id)
         prompt = _task_prompt(task, Path(policy["project"]["repo_root"]))
         starting_commit = _git(worktree, "rev-parse", "HEAD").stdout.strip()
         timeout = min(
@@ -188,6 +193,8 @@ def run_one_task(
             raise RunnerError(f"Agent command exited with status {return_code}:\n{output[-3000:]}")
         if _git(worktree, "rev-parse", "HEAD").stdout.strip() != starting_commit:
             raise RunnerError("Agent created commits directly; EnClaw requires uncommitted changes for safety checks.")
+        if store.get(task_id)["cancellation_requested"]:
+            raise RunnerError("Task cancellation requested after agent execution.")
 
         paths = _changed_paths(worktree)
         if not paths:
