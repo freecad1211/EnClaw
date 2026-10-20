@@ -179,7 +179,7 @@ class TaskStore:
                 (new_status, now, result_json, task_id),
             )
             self._event(db, task_id, actor, "task.transition", {
-                "from": current, "to": new_status, **details,
+                **details, "from": current, "to": new_status,
             })
             updated = db.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
             db.commit()
