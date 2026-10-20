@@ -185,6 +185,36 @@ class TaskStore:
             db.commit()
         return self._task(updated)
 
+    def retry_failed(self, task_id: str, *, max_retries: int, actor: str = "operator") -> dict[str, Any]:
+        """Requeue a failed task explicitly, within the caller-supplied project retry budget."""
+        if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 0:
+            raise TaskStoreError("max_retries must be a non-negative integer.")
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM tasks WHERE task_id = ?", (task_id,)).fetchone()
+            if row is None:
+                db.rollback()
+                raise TaskStoreError(f"Unknown task: {task_id}")
+            if row["status"] != "failed":
+                db.rollback()
+                raise TaskStoreError("Only failed tasks can be retried.")
+            if row["attempts"] >= max_retries:
+                db.rollback()
+                raise TaskStoreError(f"Retry budget exhausted ({row['attempts']}/{max_retries}).")
+            now = _now()
+            db.execute(
+                "UPDATE tasks SET status='queued', attempts=attempts+1, cancellation_requested=0, "
+                "updated_at=?, result_json=NULL WHERE task_id=?",
+                (now, task_id),
+            )
+            self._event(db, task_id, actor, "task.retry_requested", {
+                "previous_attempts": row["attempts"], "max_retries": max_retries,
+                "from": "failed", "to": "queued",
+            })
+            updated = db.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
+            db.commit()
+        return self._task(updated)
+
     def request_cancel(self, task_id: str, actor: str = "operator") -> dict[str, Any]:
         with self._connect() as db:
             db.execute("BEGIN IMMEDIATE")
