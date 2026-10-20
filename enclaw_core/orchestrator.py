@@ -103,10 +103,18 @@ class Orchestrator:
     ) -> dict[str, Any] | None:
         if not 1 <= max_children <= 16:
             raise OrchestrationError("max_children must be between 1 and 16.")
-        queued = [task for task in self.store.list(limit=200) if task["status"] == "queued"]
+        with self.store._connect() as db:
+            rows = db.execute(
+                "SELECT t.* FROM tasks t "
+                "LEFT JOIN task_group_children c ON c.child_task_id=t.task_id "
+                "LEFT JOIN task_groups g ON g.parent_task_id=t.task_id "
+                "WHERE t.status='queued' AND c.child_task_id IS NULL AND g.parent_task_id IS NULL "
+                "ORDER BY t.created_at ASC LIMIT 200"
+            ).fetchall()
+        queued = [self.store._task(row) for row in rows]
         if not queued:
             return None
-        parent = queued[-1]
+        parent = queued[0]
         project = projects.get(parent["project_id"])
         if not project:
             raise OrchestrationError(f"No project registry entry for {parent['project_id']!r}.")
