@@ -142,7 +142,7 @@ def build_bot() -> discord.Client:
         except (RuntimeError, OSError) as exc:
             await interaction.response.send_message(f"Cannot list projects: {exc}"[:1900], ephemeral=True)
             return
-        await interaction.response.send_message("\\n".join(lines)[:1900] or "No projects registered.", ephemeral=True)
+        await interaction.response.send_message("\n".join(lines)[:1900] or "No projects registered.", ephemeral=True)
 
     @tree.command(name="worker-status", description="Show local worker status")
     async def worker_status(interaction: discord.Interaction) -> None:
@@ -156,7 +156,7 @@ def build_bot() -> discord.Client:
             details.append(f"Last result: {worker_state['last_result']}")
         if worker_state.get("last_error"):
             details.append(f"Last error: `{str(worker_state['last_error'])[-500:]}`")
-        await interaction.response.send_message("\\n".join(details), ephemeral=True)
+        await interaction.response.send_message("\n".join(details), ephemeral=True)
 
     @tree.command(name="task-log", description="Show recent audit events for a task")
     @app_commands.describe(task_id="Task ID", limit="Number of recent events (1-15)")
@@ -173,8 +173,8 @@ def build_bot() -> discord.Client:
             details = json.dumps(event["details"], ensure_ascii=False, sort_keys=True)
             if len(details) > 180:
                 details = details[:177] + "..."
-            lines.append(f"`{event['at']}` **{event['event_type']}** — {event['actor']}\\n{details}")
-        await interaction.response.send_message("\\n".join(lines)[:1900] or "No events found.", ephemeral=True)
+            lines.append(f"`{event['at']}` **{event['event_type']}** — {event['actor']}\n{details}")
+        await interaction.response.send_message("\n".join(lines)[:1900] or "No events found.", ephemeral=True)
 
     @tree.command(name="task-create", description="Queue a task for a registered project")
     @app_commands.describe(project_id="Project ID from the EnClaw project registry", title="Short task title", description="What should be done")
