@@ -12,14 +12,14 @@
 - SQLite task queue with explicit lifecycle transitions, cooperative cancellation requests, append-only audit events, policy-bounded explicit retries, and SQLite-backed project worker slots that enforce concurrency across local worker processes.
 - CLI commands to enqueue, list, inspect, cancel, and audit tasks.
 - Optional planner-driven task decomposition (`orchestrate-once`) with strict JSON schema, bounded child count/output/time, durable parent-child records, and parent status aggregation (`orchestrate-refresh`). Existing project policies remain compatible; planning is disabled unless `runner.planner_command` is configured.
-- Operator-only Discord slash commands for task queue/list/show/cancel, policy inspection, and starting one worker task.
-- Opt-in one-task worker using project-configured coding and distinct reviewer CLIs, with bounded execution time, cancellation checks, changed-path restrictions, automatic commit creation, review gating, configured validation, and integration-branch-only fast-forward merge.
+- Operator-only Discord slash commands for task queue/list/show/cancel/retry, policy inspection, planner decomposition/aggregation, one-task execution, and a bounded worker pool.
+- Opt-in one-task worker and bounded local worker pool using project-configured coding and distinct reviewer CLIs, with cross-process project concurrency slots, bounded execution time, cancellation checks, changed-path restrictions, automatic commit creation, review gating, configured validation, and integration-branch-only fast-forward merge.
 - Unit tests, disposable-repository integration tests, Discord command-registration smoke test, and GitHub Actions CI.
 
 ## Not implemented yet
 
-- Role-specific agent scheduling and automatic worker-pool orchestration. The planner creates child tasks; workers still need to be invoked separately (or via an external service loop).
-- Automatic retry/resume orchestration and cost-budget accounting.
+- Role-specific agent scheduling (planner-created child tasks currently share the same coding/reviewer role configuration).
+- Automatic retry/resume orchestration and cost-budget accounting. Failed tasks can be retried explicitly within the project policy retry budget.
 - Authenticated review attestations and strong reviewer isolation. The reviewer is a separately configured CLI and must print `APPROVE`, but its identity is not cryptographically verified.
 - OS/container sandboxing for agent subprocesses.
 - Automatic GitHub pull-request creation and production deployment.
