@@ -48,6 +48,15 @@ For Ollama, set `OLLAMA_BASE_URL` and `OLLAMA_MODEL` in the process environment.
 
 For a remote OpenAI-compatible endpoint, set `OPENAI_COMPAT_BASE_URL` and `OPENAI_COMPAT_MODEL`. Supply an API key only through a private environment file or secret manager, never in Git. Set `OPENAI_COMPAT_IS_FREE=true` only after verifying the provider's pricing. Otherwise, remote use is denied unless the project's policy explicitly enables paid fallback.
 
+## Durable task queue smoke test
+
+```bash
+python3 -m enclaw_core.cli task-create --project smoke-test --title "Queue smoke test" --description "Verify task persistence"
+python3 -m enclaw_core.cli task-list --project smoke-test
+```
+
+This only writes a local SQLite database. It does not launch an agent.
+
 ## Current scope
 
 This branch does not yet run agents or connect a Discord bot. It provides policy validation, provider selection, isolated worktrees, and a guarded task-branch integration path. Do not treat it as the finished autonomous platform until the Discord adapter, task runner, durable audit log, and verified review flow have been implemented and tested.
