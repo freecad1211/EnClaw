@@ -65,9 +65,14 @@ def load_projects() -> dict[str, dict[str, Any]]:
         policy_path = item.get("policy_path")
         if not isinstance(project_id, str) or not project_id.strip():
             raise RuntimeError("Each project requires a non-empty id.")
+        if project_id in result:
+            raise RuntimeError(f"Duplicate project ID in registry: {project_id}")
         if not isinstance(policy_path, str) or not policy_path.strip():
             raise RuntimeError(f"Project {project_id!r} requires policy_path.")
-        result[project_id] = {"id": project_id, "policy_path": policy_path}
+        candidate = Path(policy_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = path.parent / candidate
+        result[project_id] = {"id": project_id, "policy_path": str(candidate.resolve())}
     return result
 
 
