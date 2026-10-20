@@ -142,6 +142,8 @@ def integrate_task_branch(
         raise PolicyError("Independent review approval is required by project policy.")
 
     repo = _repo_root(policy["project"]["repo_root"])
+    if not policy["validation"]["commands"]:
+        raise PolicyError("At least one validation command must be configured before automatic integration.")
     if not _branch_exists(repo, source_branch):
         raise GitOperationError(f"Source branch does not exist locally: {source_branch}")
     if not _branch_exists(repo, target_branch):
