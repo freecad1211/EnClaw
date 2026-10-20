@@ -73,7 +73,9 @@ def default_policy(
         "runner": {
             "agent_command": [],
             "review_command": [],
+            "planner_command": [],
             "max_agent_minutes": 90,
+            "max_planner_seconds": 180,
         },
         "limits": {
             "max_concurrent_agents": 1,
@@ -147,14 +149,21 @@ def validate_policy(policy: Any) -> dict[str, Any]:
     runner = policy.get("runner")
     if not isinstance(runner, dict):
         raise PolicyError("runner must be an object.")
-    for key in ("agent_command", "review_command"):
+    for key in ("agent_command", "review_command", "planner_command"):
         command = runner.get(key)
         if not isinstance(command, list) or not all(isinstance(part, str) and part for part in command):
             raise PolicyError(f"runner.{key} must be an array of non-empty strings (or an empty array to disable workers).")
         if command and not any("{prompt}" in part for part in command):
             raise PolicyError(f"runner.{key} must include the {{prompt}} placeholder.")
+    if runner.get("planner_command") and runner.get("planner_command") == runner.get("agent_command"):
+        raise PolicyError("runner.planner_command must differ from runner.agent_command.")
+    if runner.get("planner_command") and runner.get("planner_command") == runner.get("review_command"):
+        raise PolicyError("runner.planner_command must differ from runner.review_command.")
     if runner.get("agent_command") and runner.get("review_command") and runner["agent_command"] == runner["review_command"]:
         raise PolicyError("runner.agent_command and runner.review_command must be different for independent review.")
+    planner_seconds = runner.get("max_planner_seconds")
+    if not isinstance(planner_seconds, int) or isinstance(planner_seconds, bool) or not 1 <= planner_seconds <= 600:
+        raise PolicyError("runner.max_planner_seconds must be an integer from 1 to 600.")
     agent_minutes = runner.get("max_agent_minutes")
     if not isinstance(agent_minutes, int) or isinstance(agent_minutes, bool) or agent_minutes < 1:
         raise PolicyError("runner.max_agent_minutes must be a positive integer.")
