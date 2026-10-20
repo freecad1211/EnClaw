@@ -139,18 +139,24 @@ def _task_prompt(task: dict[str, Any], project_root: Path) -> str:
     )
 
 
-def run_one_task(
+def _run_one_task_claimed(
     database_path: str | Path,
     projects: dict[str, dict[str, Any]],
     *,
     actor: str = "enclaw-worker",
+    task_id_override: str | None = None,
 ) -> dict[str, Any] | None:
-    """Execute the oldest queued task once. Returns None if the queue is empty."""
+    """Execute one preselected queued task after the project slot is acquired."""
     store = TaskStore(database_path)
-    queued = [task for task in store.list(limit=200) if task["status"] == "queued"]
-    if not queued:
-        return None
-    task = queued[-1]  # list() is newest-first; pick the oldest queued task.
+    if task_id_override:
+        task = store.get(task_id_override)
+        if task["status"] != "queued":
+            return None
+    else:
+        queued = [task for task in store.list(limit=200) if task["status"] == "queued"]
+        if not queued:
+            return None
+        task = queued[-1]  # list() is newest-first; pick the oldest queued task.
     task_id = task["task_id"]
     try:
         task = store.transition(task_id, "planning", actor=actor)
@@ -249,3 +255,34 @@ def run_one_task(
         except Exception:
             pass
         raise RunnerError(f"Task {task_id} failed safely: {exc}") from exc
+
+def run_one_task(
+    database_path: str | Path,
+    projects: dict[str, dict[str, Any]],
+    *,
+    actor: str = "enclaw-worker",
+) -> dict[str, Any] | None:
+    """Run one task while enforcing the project's worker limit across processes."""
+    store = TaskStore(database_path)
+    queued = [task for task in store.list(limit=200) if task["status"] == "queued"]
+    if not queued:
+        return None
+    task = queued[-1]
+    project = projects.get(task["project_id"])
+    if not project:
+        # Preserve the existing worker's auditable failure path for bad registry entries.
+        return _run_one_task_claimed(database_path, projects, actor=actor, task_id_override=task["task_id"])
+    try:
+        policy = load_policy(project["policy_path"])
+        limit = int(policy["limits"]["max_concurrent_agents"])
+    except (PolicyError, OSError, ValueError) as exc:
+        raise RunnerError(f"Cannot load worker concurrency policy: {exc}") from exc
+    lease = store.acquire_project_slot(task["project_id"], limit)
+    if lease is None:
+        return None
+    try:
+        return _run_one_task_claimed(
+            database_path, projects, actor=actor, task_id_override=task["task_id"]
+        )
+    finally:
+        store.release_project_slot(lease)
