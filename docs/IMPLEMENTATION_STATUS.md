@@ -17,10 +17,10 @@
 
 ## Not implemented yet
 
-- Discord slash commands support task queue/list/show/cancel and project-policy inspection; no agent worker is connected yet.
+- Operator-only Discord slash commands support task queue/list/show/cancel, project-policy inspection, and starting one worker task.
 - Interactive approval workflow with verified review identity.
-- Actual multi-agent orchestration, role scheduling, and worker cancellation handling.
-- Worker execution and resume/retry orchestration; task metadata and event history are persisted, but no worker consumes the queue yet.
+- Multi-agent orchestration, role scheduling, parallel worker limits, and task resumption/retry orchestration.
+- One-task worker using project-configured coding and reviewer CLIs; worker is opt-in and runs one task at a time per process. Multi-agent scheduling is not implemented.
 - Container/sandbox enforcement for arbitrary agent tools.
 - Independent model-based code review implementation. The current review flag is an operator assertion, not a verified reviewer identity.
 - GitHub pull request workflow.
