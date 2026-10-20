@@ -67,4 +67,4 @@ The `feature/project-policy-engine` branch adds an initial project-aware automat
 - Local-first Ollama and OpenAI-compatible provider selection
 - GitHub Actions test workflow
 
-This is an early working core, not yet the finished multi-agent product. It now includes operator-only Discord task commands and an opt-in one-task worker. Parallel agent scheduling, robust reviewer attestation, sandbox isolation, enforced cost/concurrency budgets, and production deployment remain unfinished. See the implementation status before deploying.
+This is an early working core, not yet the finished multi-agent product. It includes operator-only Discord task commands and an opt-in worker that executes one queued task using configured coding and reviewer CLIs. Parallel agent scheduling, authenticated reviewer attestations, sandbox isolation, enforced cost/concurrency budgets, and production deployment remain unfinished. See the implementation status before deploying.
