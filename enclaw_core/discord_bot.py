@@ -1,0 +1,225 @@
+"""Discord slash-command control plane for EnClaw's durable task queue.
+
+This adapter can create and inspect tasks, but it does not execute them. A worker
+must be implemented and enabled separately before tasks become autonomous work.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+from typing import Any
+
+try:
+    import discord
+    from discord import app_commands
+except ImportError as exc:  # pragma: no cover - exercised in install environments
+    raise SystemExit("Install requirements first: python3 -m pip install -r requirements.txt") from exc
+
+from .policy import PolicyError, load_policy
+from .tasks import TaskStore, TaskStoreError
+
+
+def _database_path() -> str:
+    return os.environ.get("ENCLAW_DB_PATH", "~/.local/state/enclaw/tasks.sqlite3")
+
+
+def _operator_ids() -> set[int]:
+    raw = os.environ.get("DISCORD_OPERATOR_IDS", "")
+    result: set[int] = set()
+    for item in raw.split(","):
+        item = item.strip()
+        if item:
+            try:
+                result.add(int(item))
+            except ValueError as exc:
+                raise RuntimeError("DISCORD_OPERATOR_IDS must be comma-separated numeric Discord user IDs.") from exc
+    return result
+
+
+def _projects_path() -> Path:
+    return Path(os.environ.get(
+        "ENCLAW_PROJECTS_FILE", "~/.config/enclaw/projects.json"
+    )).expanduser().resolve()
+
+
+def load_projects() -> dict[str, dict[str, Any]]:
+    path = _projects_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise RuntimeError(f"Cannot read project registry: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Project registry JSON is invalid at line {exc.lineno}.") from exc
+    projects = raw.get("projects") if isinstance(raw, dict) else None
+    if not isinstance(projects, list):
+        raise RuntimeError("Project registry must contain a 'projects' array.")
+    result: dict[str, dict[str, Any]] = {}
+    for item in projects:
+        if not isinstance(item, dict):
+            raise RuntimeError("Every project registry entry must be an object.")
+        project_id = item.get("id")
+        policy_path = item.get("policy_path")
+        if not isinstance(project_id, str) or not project_id.strip():
+            raise RuntimeError("Each project requires a non-empty id.")
+        if not isinstance(policy_path, str) or not policy_path.strip():
+            raise RuntimeError(f"Project {project_id!r} requires policy_path.")
+        result[project_id] = {"id": project_id, "policy_path": policy_path}
+    return result
+
+
+def _format_task(task: dict[str, Any]) -> str:
+    return f"• `{task['task_id']}` **{task['status']}** — {task['project_id']}: {task['title']}"
+
+
+def build_bot() -> discord.Client:
+    token = os.environ.get("DISCORD_BOT_TOKEN", "").strip()
+    if not token:
+        raise RuntimeError("DISCORD_BOT_TOKEN is required.")
+    operators = _operator_ids()
+    if not operators:
+        raise RuntimeError("DISCORD_OPERATOR_IDS must contain at least one allowed Discord user ID.")
+    guild_id = os.environ.get("DISCORD_GUILD_ID", "").strip()
+    guild = discord.Object(id=int(guild_id)) if guild_id else None
+    intents = discord.Intents.none()
+    client = discord.Client(intents=intents)
+    tree = app_commands.CommandTree(client)
+
+    async def authorized(interaction: discord.Interaction) -> bool:
+        if interaction.user.id not in operators:
+            await interaction.response.send_message(
+                "This EnClaw control command is restricted to configured operators.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    @client.event
+    async def on_ready() -> None:
+        if guild is not None:
+            tree.copy_global_to(guild=guild)
+            await tree.sync(guild=guild)
+        else:
+            await tree.sync()
+        print(f"EnClaw Discord control plane ready as {client.user}", flush=True)
+
+    @tree.command(name="enclaw-status", description="Show recent EnClaw tasks")
+    async def enclaw_status(interaction: discord.Interaction) -> None:
+        if not await authorized(interaction):
+            return
+        tasks = TaskStore(_database_path()).list(limit=10)
+        if not tasks:
+            await interaction.response.send_message("No tasks have been queued.", ephemeral=True)
+            return
+        await interaction.response.send_message("\n".join(_format_task(task) for task in tasks), ephemeral=True)
+
+    @tree.command(name="task-create", description="Queue a task for a registered project")
+    @app_commands.describe(project_id="Project ID from the EnClaw project registry", title="Short task title", description="What should be done")
+    async def task_create(
+        interaction: discord.Interaction,
+        project_id: str,
+        title: str,
+        description: str,
+    ) -> None:
+        if not await authorized(interaction):
+            return
+        try:
+            projects = load_projects()
+            if project_id not in projects:
+                raise TaskStoreError(f"Unknown project ID: {project_id}")
+            task = TaskStore(_database_path()).create(
+                project_id, title, description, actor=f"discord:{interaction.user.id}"
+            )
+        except (RuntimeError, TaskStoreError) as exc:
+            await interaction.response.send_message(f"Task not created: {exc}", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"Task queued: `{task['task_id']}` — {task['title']}\n"
+            "Queueing does not start an agent yet; the worker runtime is not implemented.",
+            ephemeral=True,
+        )
+
+    @tree.command(name="task-list", description="List EnClaw tasks")
+    @app_commands.describe(project_id="Optional project ID filter")
+    async def task_list(interaction: discord.Interaction, project_id: str = "") -> None:
+        if not await authorized(interaction):
+            return
+        try:
+            tasks = TaskStore(_database_path()).list(project_id=project_id.strip() or None, limit=15)
+        except TaskStoreError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        message = "\n".join(_format_task(task) for task in tasks) or "No tasks found."
+        await interaction.response.send_message(message[:1900], ephemeral=True)
+
+    @tree.command(name="task-show", description="Show a task and its recent audit events")
+    async def task_show(interaction: discord.Interaction, task_id: str) -> None:
+        if not await authorized(interaction):
+            return
+        try:
+            store = TaskStore(_database_path())
+            task = store.get(task_id)
+            events = store.events(task_id)[-8:]
+        except TaskStoreError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        event_lines = [f"`{event['at']}` {event['event_type']} ({event['actor']})" for event in events]
+        message = f"**{task['title']}**\nID: `{task_id}`\nProject: {task['project_id']}\nStatus: {task['status']}\n" + "\n".join(event_lines)
+        await interaction.response.send_message(message[:1900], ephemeral=True)
+
+    @tree.command(name="task-cancel", description="Request cancellation of a queued or active task")
+    async def task_cancel(interaction: discord.Interaction, task_id: str) -> None:
+        if not await authorized(interaction):
+            return
+        try:
+            task = TaskStore(_database_path()).request_cancel(
+                task_id, actor=f"discord:{interaction.user.id}"
+            )
+        except TaskStoreError as exc:
+            await interaction.response.send_message(f"Cancellation not requested: {exc}", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            f"Cancellation requested for `{task_id}`. A worker must observe this flag to stop.",
+            ephemeral=True,
+        )
+
+    @tree.command(name="project-policy", description="Show a project's policy summary")
+    async def project_policy(interaction: discord.Interaction, project_id: str) -> None:
+        if not await authorized(interaction):
+            return
+        try:
+            project = load_projects().get(project_id)
+            if project is None:
+                raise TaskStoreError(f"Unknown project ID: {project_id}")
+            policy = load_policy(project["policy_path"])
+        except (RuntimeError, TaskStoreError, PolicyError) as exc:
+            await interaction.response.send_message(f"Cannot load policy: {exc}", ephemeral=True)
+            return
+        permissions = policy["permissions"]
+        enabled = ", ".join(sorted(name for name, value in permissions.items() if value)) or "none"
+        text = (
+            f"**{project_id} policy**\n"
+            f"Base: `{policy['git']['base_branch']}`\n"
+            f"Integration target: `{policy['git']['integration_branch']}`\n"
+            f"Protected branches: {', '.join(policy['git']['protected_branches'])}\n"
+            f"Enabled capabilities: {enabled}\n"
+            f"Provider order: {', '.join(policy['providers']['preference'])}"
+        )
+        await interaction.response.send_message(text[:1900], ephemeral=True)
+
+    return client
+
+
+def main() -> int:
+    try:
+        build_bot().run(os.environ["DISCORD_BOT_TOKEN"])
+        return 0
+    except (RuntimeError, KeyError, ValueError) as exc:
+        print(f"EnClaw Discord adapter stopped safely: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
