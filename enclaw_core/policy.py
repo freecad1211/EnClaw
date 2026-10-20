@@ -76,7 +76,7 @@ def default_policy(
             "max_agent_minutes": 90,
         },
         "limits": {
-            "max_concurrent_agents": 3,
+            "max_concurrent_agents": 1,
             "max_task_minutes": 90,
             "max_retries": 2,
             "max_cost_usd": 0,
