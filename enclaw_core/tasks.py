@@ -239,6 +239,60 @@ class TaskStore:
         with self._connect() as db:
             db.execute("DELETE FROM worker_leases WHERE lease_id=?", (lease_id,))
 
+    def recover_orphaned_tasks(self, *, actor: str = "enclaw-recovery") -> list[dict[str, Any]]:
+        """Mark active tasks failed when their worker process is no longer alive.
+
+        Human approval tasks are intentionally excluded. Tasks interrupted during
+        integration are failed for manual inspection rather than automatically replayed.
+        """
+        recoverable = {"planning", "running", "validating", "integrating"}
+        recovered: list[dict[str, Any]] = []
+        now_epoch = time.time()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            leases = db.execute(
+                "SELECT lease_id, project_id, pid, expires_epoch FROM worker_leases"
+            ).fetchall()
+            live_projects: set[str] = set()
+            for lease in leases:
+                alive = True
+                try:
+                    os.kill(int(lease["pid"]), 0)
+                except ProcessLookupError:
+                    alive = False
+                except PermissionError:
+                    alive = True
+                if not alive or now_epoch > float(lease["expires_epoch"]):
+                    db.execute("DELETE FROM worker_leases WHERE lease_id=?", (lease["lease_id"],))
+                else:
+                    live_projects.add(lease["project_id"])
+
+            rows = db.execute(
+                "SELECT * FROM tasks WHERE status IN ('planning', 'running', 'validating', 'integrating')"
+            ).fetchall()
+            for row in rows:
+                if row["project_id"] in live_projects:
+                    continue
+                prior = row["status"]
+                reason = (
+                    "Worker process disappeared during integration; inspect the integration branch "
+                    "before retrying."
+                    if prior == "integrating"
+                    else "Worker process disappeared while task was active; retry only after inspecting its worktree."
+                )
+                now = _now()
+                db.execute(
+                    "UPDATE tasks SET status='failed', updated_at=? WHERE task_id=?",
+                    (now, row["task_id"]),
+                )
+                self._event(db, row["task_id"], actor, "task.recovered_orphaned", {
+                    "from": prior, "to": "failed", "reason": reason,
+                })
+                updated = db.execute("SELECT * FROM tasks WHERE task_id=?", (row["task_id"],)).fetchone()
+                recovered.append(self._task(updated))
+            db.commit()
+        return recovered
+
     def retry_failed(self, task_id: str, *, max_retries: int, actor: str = "operator") -> dict[str, Any]:
         """Requeue a failed task explicitly, within the caller-supplied project retry budget."""
         if not isinstance(max_retries, int) or isinstance(max_retries, bool) or max_retries < 0:
