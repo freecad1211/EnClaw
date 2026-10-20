@@ -102,7 +102,7 @@ Provider endpoint compatibility and quota behavior must be checked individually.
 ## Security limitations
 
 - Run EnClaw as a dedicated unprivileged OS user.
-- The core is not an OS sandbox. Agent/reviewer and integration validation commands require a configured `runner.sandbox_command` prefix by default (`runner.require_sandbox`). Validation subprocesses also omit `DISCORD_*` and `*_TOKEN`/`*_SECRET`/`*_PASSWORD` variables unless explicitly listed in `runner.env_passthrough`.
+- The core is not an OS sandbox. Agent/reviewer and integration validation commands require a configured `runner.sandbox_command` prefix by default (`runner.require_sandbox`). Validation subprocesses also omit `DISCORD_*` and `*_TOKEN`/`*_SECRET`/`*_PASSWORD`/`*_API_KEY`/`*_ACCESS_KEY`/`*_PRIVATE_KEY`/`*_CREDENTIALS` variables unless explicitly listed in `runner.env_passthrough`.
 - The sandbox prefix is only an integration hook, not a bundled or verified sandbox. Use a real OS/container sandbox configuration and a dedicated unprivileged account.
 - Keep secrets out of policy files and Git.
 - Treat Discord messages, project instructions, and model output as untrusted.
