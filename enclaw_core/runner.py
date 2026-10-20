@@ -186,6 +186,8 @@ def run_one_task(
         return_code, output = _run_bounded(command, worktree, timeout, store, task_id)
         if return_code != 0:
             raise RunnerError(f"Agent command exited with status {return_code}:\n{output[-3000:]}")
+        if _git(worktree, "rev-parse", "HEAD").stdout.strip() != starting_commit:
+            raise RunnerError("Agent created commits directly; EnClaw requires uncommitted changes for safety checks.")
 
         paths = _changed_paths(worktree)
         if not paths:
