@@ -85,7 +85,7 @@ class SandboxEnforcementTests(unittest.TestCase):
             task = store.create("p", "title", "description")
             result = run_one_task(database, {"p": entry})
             self.assertEqual(result["status"], "completed")
-            self.assertEqual(marker.read_text(), "xx")  # agent + reviewer
+            self.assertEqual(marker.read_text(), "xxx")  # agent + reviewer + validation
             self.assertEqual(store.get(task["task_id"])["status"], "completed")
 
 
@@ -103,9 +103,13 @@ class EnvironmentScrubbingTests(unittest.TestCase):
             self.assertNotIn("DISCORD_BOT_TOKEN", env)
             self.assertNotIn("GITHUB_TOKEN", env)
             self.assertNotIn("DB_PASSWORD", env)
-            self.assertEqual(env["OPENAI_API_KEY"], "needed-by-agent")
+            self.assertNotIn("OPENAI_API_KEY", env)
             self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
             self.assertEqual(_agent_env({"env_passthrough": ["GITHUB_TOKEN"]})["GITHUB_TOKEN"], "gh-secret")
+            self.assertEqual(
+                _agent_env({"env_passthrough": ["OPENAI_API_KEY"]})["OPENAI_API_KEY"],
+                "needed-by-agent",
+            )
 
     def test_policy_rejects_bad_env_passthrough(self):
         policy = default_policy("p", "/tmp/repo")
