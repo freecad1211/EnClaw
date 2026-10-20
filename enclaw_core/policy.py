@@ -139,6 +139,19 @@ def validate_policy(policy: Any) -> dict[str, Any]:
         if not isinstance(providers.get(key), bool):
             raise PolicyError(f"providers.{key} must be a boolean.")
 
+    runner = policy.get("runner")
+    if not isinstance(runner, dict):
+        raise PolicyError("runner must be an object.")
+    for key in ("agent_command", "review_command"):
+        command = runner.get(key)
+        if not isinstance(command, list) or not all(isinstance(part, str) and part for part in command):
+            raise PolicyError(f"runner.{key} must be an array of non-empty strings (or an empty array to disable workers).")
+        if command and not any("{prompt}" in part for part in command):
+            raise PolicyError(f"runner.{key} must include the {{prompt}} placeholder.")
+    agent_minutes = runner.get("max_agent_minutes")
+    if not isinstance(agent_minutes, int) or isinstance(agent_minutes, bool) or agent_minutes < 1:
+        raise PolicyError("runner.max_agent_minutes must be a positive integer.")
+
     integer_limits = ("max_concurrent_agents", "max_task_minutes", "max_retries")
     for key in integer_limits:
         value = limits.get(key)
