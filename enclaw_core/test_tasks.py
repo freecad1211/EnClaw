@@ -30,6 +30,18 @@ class TaskStoreTests(unittest.TestCase):
         self.assertTrue(updated["cancellation_requested"])
         self.assertEqual(self.store.events(self.task["task_id"])[-1]["event_type"], "task.cancel_requested")
 
+    def test_failed_task_retry_is_bounded_and_clears_cancel_flag(self):
+        self.store.transition(self.task["task_id"], "planning", actor="test")
+        self.store.transition(self.task["task_id"], "failed", actor="test")
+        retried = self.store.retry_failed(self.task["task_id"], max_retries=1)
+        self.assertEqual(retried["status"], "queued")
+        self.assertEqual(retried["attempts"], 1)
+        self.assertFalse(retried["cancellation_requested"])
+        self.store.transition(self.task["task_id"], "planning", actor="test")
+        self.store.transition(self.task["task_id"], "failed", actor="test")
+        with self.assertRaises(TaskStoreError):
+            self.store.retry_failed(self.task["task_id"], max_retries=1)
+
     def test_terminal_task_cannot_be_cancelled(self):
         self.store.transition(self.task["task_id"], "cancelled", actor="operator")
         with self.assertRaises(TaskStoreError):
