@@ -66,10 +66,18 @@ def _require_sandbox_configured(runner: dict[str, Any]) -> None:
         )
 
 
-def _apply_sandbox(runner: dict[str, Any], argv: Sequence[str], worktree: Path, task_id: str) -> list[str]:
+def _apply_sandbox(
+    runner: dict[str, Any],
+    argv: Sequence[str],
+    worktree: Path,
+    task_id: str,
+    repo_root: Path,
+) -> list[str]:
     _require_sandbox_configured(runner)
     prefix = [
-        part.replace("{worktree}", str(worktree)).replace("{task_id}", task_id)
+        part.replace("{worktree}", str(worktree))
+            .replace("{repo_root}", str(repo_root))
+            .replace("{task_id}", task_id)
         for part in runner.get("sandbox_command", [])
     ]
     return [*prefix, *argv]
@@ -251,7 +259,10 @@ def _run_one_task_claimed(
         )
         if timeout <= 0:
             raise RunnerError("Agent timeout must be greater than zero.")
-        command = _apply_sandbox(runner, _format_command(agent_command, prompt, worktree, task_id), worktree, task_id)
+        command = _apply_sandbox(
+            runner, _format_command(agent_command, prompt, worktree, task_id),
+            worktree, task_id, Path(policy["project"]["repo_root"]),
+        )
         return_code, output = _run_bounded(command, worktree, timeout, store, task_id, env=_agent_env(runner))
         if return_code != 0:
             raise RunnerError(f"Agent command exited with status {return_code}:\n{output[-3000:]}")
@@ -283,7 +294,10 @@ def _run_one_task_claimed(
             "Approve only if the change is acceptable; explain blocking findings after REJECT.\n\n"
             f"Task: {task['title']}\n{task['description']}\n\nCommit summary:\n{diff}"
         )
-        review_argv = _apply_sandbox(runner, _format_command(review_command, review_prompt, worktree, task_id), worktree, task_id)
+        review_argv = _apply_sandbox(
+            runner, _format_command(review_command, review_prompt, worktree, task_id),
+            worktree, task_id, Path(policy["project"]["repo_root"]),
+        )
         review_code, review_output = _run_bounded(review_argv, worktree, timeout, store, task_id, env=_agent_env(runner))
         if review_code != 0:
             raise RunnerError(f"Reviewer command exited with status {review_code}:\n{review_output[-3000:]}")
