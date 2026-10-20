@@ -15,7 +15,7 @@
 
 ## Not implemented yet
 
-- Discord bot commands and interactive approvals.
+- Discord task-control commands exist for queue/list/show/cancel and policy inspection. No agent worker is connected yet.\n- Interactive approval workflow with verified review identity.
 - Actual multi-agent orchestration, role scheduling, and worker cancellation handling.
 - Worker execution and resume/retry orchestration; task metadata and event history are persisted, but no worker consumes the queue yet.
 - Container/sandbox enforcement for arbitrary agent tools.
