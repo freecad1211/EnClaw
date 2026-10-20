@@ -10,6 +10,7 @@ from unittest import mock
 
 from .policy import default_policy, validate_policy
 from .runner import RunnerError, _agent_env, run_one_task
+from .sandbox import SandboxError, build_bwrap_argv
 from .tasks import TaskStore
 
 
@@ -116,6 +117,36 @@ class EnvironmentScrubbingTests(unittest.TestCase):
         policy["runner"]["env_passthrough"] = "GITHUB_TOKEN"
         with self.assertRaises(Exception):
             validate_policy(policy)
+
+
+class BuiltInSandboxTests(unittest.TestCase):
+    def test_missing_bubblewrap_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            worktree = Path(tmp) / "worktree"
+            root.mkdir()
+            worktree.mkdir()
+            _git(root, "init", "-b", "develop")
+            with mock.patch("enclaw_core.sandbox.sys.platform", "linux"), \\
+                 mock.patch("enclaw_core.sandbox.shutil.which", return_value=None):
+                with self.assertRaisesRegex(SandboxError, "not installed"):
+                    build_bwrap_argv(worktree, root, ["python3", "-c", "pass"])
+
+    def test_bubblewrap_disables_network_and_mounts_git_metadata_read_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            worktree = Path(tmp) / "worktree"
+            root.mkdir()
+            worktree.mkdir()
+            _git(root, "init", "-b", "develop")
+            with mock.patch("enclaw_core.sandbox.sys.platform", "linux"), \\
+                 mock.patch("enclaw_core.sandbox.shutil.which", return_value="/usr/bin/bwrap"):
+                command = build_bwrap_argv(worktree, root, ["python3", "-c", "pass"])
+            self.assertIn("--unshare-all", command)
+            self.assertIn("--ro-bind", command)
+            self.assertIn("--bind", command)
+            self.assertIn(str(worktree.resolve()), command)
+            self.assertEqual(command[-3:], ["python3", "-c", "pass"])
 
 
 class RetryAndFairnessTests(unittest.TestCase):
