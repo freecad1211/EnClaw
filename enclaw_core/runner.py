@@ -26,6 +26,11 @@ _FORBIDDEN_PATH_PARTS = {
     "id_rsa", "id_ed25519", "known_hosts",
 }
 _FORBIDDEN_SUFFIXES = {".pem", ".key", ".p12", ".pfx"}
+_DEPENDENCY_FILES = {
+    "package.json", "pnpm-lock.yaml", "package-lock.json", "yarn.lock",
+    "requirements.txt", "pyproject.toml", "poetry.lock", "uv.lock",
+    "cargo.toml", "cargo.lock", "go.mod", "go.sum",
+}
 
 
 def _changed_paths(worktree: Path) -> list[str]:
@@ -42,7 +47,7 @@ def _changed_paths(worktree: Path) -> list[str]:
     return paths
 
 
-def _check_changed_paths(paths: Sequence[str]) -> None:
+def _check_changed_paths(paths: Sequence[str], *, allow_dependencies: bool = False) -> None:
     for path in paths:
         parts = {part.lower() for part in Path(path).parts}
         name = Path(path).name.lower()
@@ -53,6 +58,8 @@ def _check_changed_paths(paths: Sequence[str]) -> None:
             or name.endswith(tuple(_FORBIDDEN_SUFFIXES))
             or path.startswith(".enclaw/")
             or path == ".git"
+            or (not allow_dependencies and name in _DEPENDENCY_FILES)
+            or path.startswith(".github/workflows/")
         ):
             raise RunnerError(f"Changed path is outside the default agent allowlist: {path}")
 
@@ -168,6 +175,7 @@ def run_one_task(
         worktree = create_worktree(policy, task_id, branch)
         task = store.transition(task_id, "running", actor=actor, details={"branch": branch, "worktree": str(worktree)})
         prompt = _task_prompt(task, Path(policy["project"]["repo_root"]))
+        starting_commit = _git(worktree, "rev-parse", "HEAD").stdout.strip()
         timeout = min(
             int(runner.get("max_agent_minutes", policy["limits"]["max_task_minutes"])) * 60,
             int(policy["limits"]["max_task_minutes"]) * 60,
@@ -182,11 +190,11 @@ def run_one_task(
         paths = _changed_paths(worktree)
         if not paths:
             raise RunnerError("Agent completed without making any tracked or untracked changes.")
-        _check_changed_paths(paths)
+        _check_changed_paths(paths, allow_dependencies=policy["permissions"]["change_dependencies"])
         _git(worktree, "add", "--all")
         staged = _git(worktree, "diff", "--cached", "--name-only", "-z").stdout
         staged_paths = [path for path in staged.split("\0") if path]
-        _check_changed_paths(staged_paths)
+        _check_changed_paths(staged_paths, allow_dependencies=policy["permissions"]["change_dependencies"])
         _git(worktree, "config", "user.name", "EnClaw Agent")
         _git(worktree, "config", "user.email", "enclaw-agent@localhost")
         _git(worktree, "commit", "-m", f"agent: {task['title'][:60]}")
@@ -227,7 +235,8 @@ def run_one_task(
         try:
             current = store.get(task_id)
             if current["status"] not in {"completed", "failed", "cancelled"}:
-                store.transition(task_id, "failed", actor=actor, details={"reason": str(exc)[:3000]})
+                final_status = "cancelled" if current["cancellation_requested"] else "failed"
+                store.transition(task_id, final_status, actor=actor, details={"reason": str(exc)[:3000]})
         except Exception:
             pass
         raise RunnerError(f"Task {task_id} failed safely: {exc}") from exc
