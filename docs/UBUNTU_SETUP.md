@@ -75,7 +75,21 @@ Start the control plane:
 python -m enclaw_core.discord_bot
 ```
 
-Available slash commands are `/enclaw-status`, `/task-create`, `/task-list`, `/task-show`, `/task-cancel`, and `/project-policy`. Commands are restricted to configured operator IDs. Task creation only enqueues work; no autonomous worker is included yet. Run it manually first, not as a system service.
+Available slash commands are `/enclaw-status`, `/task-create`, `/task-list`, `/task-show`, `/task-cancel`, `/worker-once`, and `/project-policy`. Commands are restricted to configured operator IDs. `/worker-once` executes one queued task using the configured implementation and reviewer commands. Configure those commands in each policy first and run it manually before considering any service setup.
+
+## Configure the coding worker
+
+In each generated `.enclaw/policy.json`, set the runner fields to the installed coding CLI and a distinct reviewer configuration. Example shape (replace model IDs with models you have actually configured):
+
+```json
+"runner": {
+  "agent_command": ["opencode", "run", "--model", "YOUR_LOCAL_CODER_MODEL", "{prompt}"],
+  "review_command": ["opencode", "run", "--model", "YOUR_DIFFERENT_REVIEW_MODEL", "{prompt}"],
+  "max_agent_minutes": 90
+}
+```
+
+Verify the installed CLI's argument syntax with its help command. Configure at least one validation command as an argv array before automatic integration. For example, a Next.js project may use `["npm", "test"]`, `["npm", "run", "lint"]`, or `["npm", "run", "build"]` if those scripts exist. Never configure an untrusted command. The worker runs with the EnClaw OS user's permissions; it is not a container sandbox.
 
 ## Current scope
 
