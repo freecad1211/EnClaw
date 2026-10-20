@@ -94,6 +94,7 @@ def build_bot() -> discord.Client:
     client = discord.Client(intents=intents)
     tree = app_commands.CommandTree(client)
     worker_lock = asyncio.Lock()
+    worker_state: dict[str, Any] = {"running": False, "mode": None, "started_at": None, "last_result": None, "last_error": None}
 
     async def authorized(interaction: discord.Interaction) -> bool:
         if interaction.user.id not in operators:
@@ -122,6 +123,58 @@ def build_bot() -> discord.Client:
             await interaction.response.send_message("No tasks have been queued.", ephemeral=True)
             return
         await interaction.response.send_message("\n".join(_format_task(task) for task in tasks), ephemeral=True)
+
+    @tree.command(name="project-list", description="List registered projects")
+    async def project_list(interaction: discord.Interaction) -> None:
+        if not await authorized(interaction):
+            return
+        try:
+            projects = load_projects()
+            lines = []
+            for project_id, project in sorted(projects.items()):
+                try:
+                    policy = load_policy(project["policy_path"])
+                    target = policy["git"]["integration_branch"]
+                    autonomy = policy.get("autonomy", {}).get("level", "policy-defined")
+                    lines.append(f"• **{project_id}** — integration: `{target}`, autonomy: `{autonomy}`")
+                except (PolicyError, OSError, KeyError, TypeError):
+                    lines.append(f"• **{project_id}** — policy unavailable or invalid")
+        except (RuntimeError, OSError) as exc:
+            await interaction.response.send_message(f"Cannot list projects: {exc}"[:1900], ephemeral=True)
+            return
+        await interaction.response.send_message("\\n".join(lines)[:1900] or "No projects registered.", ephemeral=True)
+
+    @tree.command(name="worker-status", description="Show local worker status")
+    async def worker_status(interaction: discord.Interaction) -> None:
+        if not await authorized(interaction):
+            return
+        state = "running" if worker_state["running"] else "idle"
+        details = [f"State: **{state}**", f"Mode: {worker_state.get('mode') or '—'}"]
+        if worker_state.get("started_at"):
+            details.append(f"Started: `{worker_state['started_at']}`")
+        if worker_state.get("last_result"):
+            details.append(f"Last result: {worker_state['last_result']}")
+        if worker_state.get("last_error"):
+            details.append(f"Last error: `{str(worker_state['last_error'])[-500:]}`")
+        await interaction.response.send_message("\\n".join(details), ephemeral=True)
+
+    @tree.command(name="task-log", description="Show recent audit events for a task")
+    @app_commands.describe(task_id="Task ID", limit="Number of recent events (1-15)")
+    async def task_log(interaction: discord.Interaction, task_id: str, limit: app_commands.Range[int, 1, 15] = 10) -> None:
+        if not await authorized(interaction):
+            return
+        try:
+            events = TaskStore(_database_path()).events(task_id)[-limit:]
+        except TaskStoreError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+        lines = []
+        for event in events:
+            details = json.dumps(event["details"], ensure_ascii=False, sort_keys=True)
+            if len(details) > 180:
+                details = details[:177] + "..."
+            lines.append(f"`{event['at']}` **{event['event_type']}** — {event['actor']}\\n{details}")
+        await interaction.response.send_message("\\n".join(lines)[:1900] or "No events found.", ephemeral=True)
 
     @tree.command(name="task-create", description="Queue a task for a registered project")
     @app_commands.describe(project_id="Project ID from the EnClaw project registry", title="Short task title", description="What should be done")
@@ -232,15 +285,24 @@ def build_bot() -> discord.Client:
 
         async def background_worker() -> None:
             async with worker_lock:
+                worker_state.update({"running": True, "mode": "worker-once", "started_at": __import__("datetime").datetime.now().astimezone().isoformat(timespec="seconds"), "last_error": None})
+                await interaction.followup.send("Worker execution started; task transitions will be recorded in the audit log.", ephemeral=True)
                 try:
-                    await asyncio.to_thread(
+                    result = await asyncio.to_thread(
                         run_one_task,
                         _database_path(),
                         load_projects(),
                         actor=f"discord-worker:{interaction.user.id}",
                     )
+                    worker_state["last_result"] = str(result)[:500] if result is not None else "no queued task processed"
+                    await interaction.followup.send(f"Worker finished: {worker_state['last_result']}"[:1800], ephemeral=True)
                 except Exception as exc:
+                    worker_state["last_error"] = f"{type(exc).__name__}: {exc}"
                     print(f"EnClaw worker stopped safely: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+                    await interaction.followup.send(f"Worker failed: {type(exc).__name__}: {str(exc)[-700:]}"[:1800], ephemeral=True)
+                finally:
+                    worker_state["running"] = False
+                    worker_state["mode"] = None
 
         asyncio.create_task(background_worker())
 
@@ -256,6 +318,7 @@ def build_bot() -> discord.Client:
 
         async def background_pool() -> None:
             async with worker_lock:
+                worker_state.update({"running": True, "mode": f"worker-pool ({workers})", "started_at": __import__("datetime").datetime.now().astimezone().isoformat(timespec="seconds"), "last_error": None})
                 try:
                     results = await asyncio.to_thread(
                         run_worker_pool,
@@ -266,15 +329,20 @@ def build_bot() -> discord.Client:
                     )
                     completed = sum(1 for item in results if item.get("status") == "completed")
                     failed = sum(1 for item in results if item.get("status") == "failed")
+                    worker_state["last_result"] = f"completed={completed}, failed={failed}, total={len(results)}"
                     await interaction.followup.send(
                         f"Worker pool finished. Completed: {completed}; failed: {failed}; results: {len(results)}.",
                         ephemeral=True,
                     )
                 except Exception as exc:
+                    worker_state["last_error"] = f"{type(exc).__name__}: {exc}"
                     await interaction.followup.send(
-                        f"Worker pool stopped safely: {type(exc).__name__}: {exc}"[:1900],
+                        f"Worker pool stopped safely: {type(exc).__name__}: {str(exc)[-700:]}"[:1900],
                         ephemeral=True,
                     )
+                finally:
+                    worker_state["running"] = False
+                    worker_state["mode"] = None
 
         asyncio.create_task(background_pool())
         await interaction.followup.send(
