@@ -35,6 +35,10 @@ def _masked_parent_dirs(path: Path) -> list[str]:
     return []
 
 
+def _is_masked(path: Path) -> bool:
+    return any(path == root or root in path.parents for root in _MASKED_ROOTS)
+
+
 def build_bwrap_argv(worktree: Path, repo_root: Path, command: Sequence[str]) -> list[str]:
     """Build a fail-closed bubblewrap invocation without a shell."""
     if sys.platform != "linux":
@@ -70,12 +74,21 @@ def build_bwrap_argv(worktree: Path, repo_root: Path, command: Sequence[str]) ->
     ]
     # Host home directories and temporary files are hidden. The worktree is the
     # only writable host mount; shared Git metadata is read-only.
+    created_dirs: set[str] = set()
     for path in (common_dir, worktree):
-        argv.extend(_masked_parent_dirs(path.parent))
         if any(path == root for root in _MASKED_ROOTS):
             raise SandboxError(f"Refusing to mount a masked root directly: {path}")
-    argv.extend(["--dir", str(common_dir), "--ro-bind", str(common_dir), str(common_dir)])
-    argv.extend(["--dir", str(worktree), "--bind", str(worktree), str(worktree)])
+        directory_args = _masked_parent_dirs(path.parent)
+        for index in range(0, len(directory_args), 2):
+            directory = directory_args[index + 1]
+            if directory not in created_dirs:
+                argv.extend(directory_args[index:index + 2])
+                created_dirs.add(directory)
+        if _is_masked(path) and str(path) not in created_dirs:
+            argv.extend(["--dir", str(path)])
+            created_dirs.add(str(path))
+    argv.extend(["--ro-bind", str(common_dir), str(common_dir)])
+    argv.extend(["--bind", str(worktree), str(worktree)])
     argv.extend([
         "--chdir", str(worktree), "--setenv", "HOME", "/tmp",
         "--setenv", "TMPDIR", "/tmp", "--",
