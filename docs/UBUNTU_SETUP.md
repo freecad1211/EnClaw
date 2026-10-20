@@ -69,9 +69,9 @@ cp config/projects.example.json ~/.config/enclaw/projects.json
 
 모델 ID와 CLI 인자를 추측하지 말고 설치된 도구의 도움말로 확인하세요. 무료 API 여부는 공급자의 실제 가격과 사용 한도로 검증해야 합니다.
 
-기본값 `runner.require_sandbox: true`에서는 `runner.sandbox_command`가 비어 있으면 에이전트 실행을 거부합니다. Ubuntu에서는 선택적으로 `sudo apt install bubblewrap` 후 내장 백엔드를 설정할 수 있습니다. 정책의 `runner.sandbox_command`를 다음 argv 배열로 설정하세요:
+기본값 `runner.require_sandbox: true`에서는 `runner.sandbox_command`가 비어 있으면 에이전트 실행을 거부합니다. Ubuntu에서는 선택적으로 `sudo apt install bubblewrap` 후 내장 백엔드를 설정할 수 있습니다. EnClaw 저장소가 `/opt/enclaw`에 설치되어 있다고 가정하면 정책의 `runner.sandbox_command`를 다음 argv 배열로 설정하세요. 설치 경로가 다르면 스크립트의 절대 경로를 바꾸세요:
 ```json
-["python3", "-m", "enclaw_core.sandbox", "--worktree", "{worktree}", "--repo-root", "{repo_root}", "--"]
+["python3", "/opt/enclaw/enclaw_core/sandbox.py", "--worktree", "{worktree}", "--repo-root", "{repo_root}", "--"]
 ```
 이 백엔드는 Linux에서만 동작하며 네트워크 네임스페이스를 분리하고, 홈/임시 디렉터리를 숨기며, 작업 worktree만 쓰기 가능하게 하고 공유 Git 메타데이터는 읽기 전용으로 마운트합니다. Bubblewrap 및 사용자 네임스페이스가 실제 시스템에서 동작하는지 별도 테스트 저장소로 확인하세요. 실패하면 우회 실행하지 않고 중단합니다. 이는 방어 심층화이며 전용 비특권 계정이나 컨테이너/VM 경계를 대체하지 않습니다. `runner.require_sandbox: false`는 신뢰할 수 있는 로컬 개발에서만 사용하세요.
 
