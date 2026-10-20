@@ -6,6 +6,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,7 +46,7 @@ def configured_providers(policy: dict[str, Any], environ: dict[str, str] | None 
             base_url=compatible_url,
             model=compatible_model,
             api_key=env.get("OPENAI_COMPAT_API_KEY") or None,
-            local=compatible_url.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]")),
+            local=(urlsplit(compatible_url).scheme == "http" and urlsplit(compatible_url).hostname in {"127.0.0.1", "localhost", "::1"}),
             free=env.get("OPENAI_COMPAT_IS_FREE", "false").strip().lower() in {"1", "true", "yes"},
         )
 
