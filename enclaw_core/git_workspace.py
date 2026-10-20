@@ -45,14 +45,14 @@ def _branch_exists(repo: Path, branch: str) -> bool:
 
 
 def _assert_branch_name(branch: str) -> None:
-    if not branch or branch.startswith("-") or _git(Path.cwd(), "check-ref-format", "--branch", branch, check=False).returncode != 0:
-        # check-ref-format does not need to run inside a repository, but -C does; fall back below.
-        result = subprocess.run(
-            ["git", "check-ref-format", "--branch", branch],
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
-        )
-        if not branch or branch.startswith("-") or result.returncode != 0:
-            raise GitOperationError(f"Invalid Git branch name: {branch!r}")
+    if not branch or branch.startswith("-"):
+        raise GitOperationError(f"Invalid Git branch name: {branch!r}")
+    result = subprocess.run(
+        ["git", "check-ref-format", "--branch", branch],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    if result.returncode != 0:
+        raise GitOperationError(f"Invalid Git branch name: {branch!r}")
 
 
 def _ensure_clean(repo: Path) -> None:
