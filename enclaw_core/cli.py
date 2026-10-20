@@ -12,6 +12,7 @@ from .git_workspace import create_worktree, integrate_task_branch
 from .policy import PolicyError, default_policy, load_policy, validate_policy
 from .tasks import TaskStore, TaskStoreError
 from .runner import run_one_task, RunnerError
+from .orchestrator import Orchestrator, OrchestrationError
 
 
 def _write_json(path: Path, data: dict) -> None:
@@ -82,6 +83,14 @@ def main(argv: list[str] | None = None) -> int:
     worker.add_argument("--db")
     worker.add_argument("--projects", default="~/.config/enclaw/projects.json")
 
+    plan = sub.add_parser("orchestrate-once", help="Decompose one queued parent task using its configured planner CLI")
+    plan.add_argument("--db")
+    plan.add_argument("--projects", default="~/.config/enclaw/projects.json")
+    plan.add_argument("--max-children", type=int, default=8)
+
+    refresh = sub.add_parser("orchestrate-refresh", help="Aggregate completed child tasks into parent task status")
+    refresh.add_argument("--db")
+
     args = parser.parse_args(argv)
     try:
         if args.command == "init-project":
@@ -117,6 +126,27 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(_store(args.db).request_cancel(args.task_id), indent=2))
         elif args.command == "task-events":
             print(json.dumps(_store(args.db).events(args.task_id), indent=2))
+        elif args.command == "orchestrate-once":
+            registry_path = Path(args.projects).expanduser().resolve()
+            registry = json.loads(registry_path.read_text(encoding="utf-8"))
+            entries = registry.get("projects") if isinstance(registry, dict) else None
+            if not isinstance(entries, list):
+                raise PolicyError("Project registry must contain a 'projects' array.")
+            projects = {}
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(entry.get("id"), str) or not isinstance(entry.get("policy_path"), str):
+                    raise PolicyError("Every project registry entry requires string id and policy_path.")
+                if entry["id"] in projects:
+                    raise PolicyError(f"Duplicate project id in registry: {entry['id']}")
+                policy_path = Path(entry["policy_path"]).expanduser()
+                if not policy_path.is_absolute():
+                    policy_path = registry_path.parent / policy_path
+                projects[entry["id"]] = {**entry, "policy_path": str(policy_path.resolve())}
+            result = Orchestrator(args.db or os.environ.get("ENCLAW_DB_PATH", "~/.local/state/enclaw/tasks.sqlite3")).decompose_one(projects, max_children=args.max_children)
+            print(json.dumps(result, indent=2) if result else "No queued task was available.")
+        elif args.command == "orchestrate-refresh":
+            result = Orchestrator(args.db or os.environ.get("ENCLAW_DB_PATH", "~/.local/state/enclaw/tasks.sqlite3")).refresh_groups()
+            print(json.dumps(result, indent=2))
         elif args.command == "worker-once":
             registry_path = Path(args.projects).expanduser().resolve()
             registry = json.loads(registry_path.read_text(encoding="utf-8"))
@@ -136,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
             result = run_one_task(args.db or os.environ.get("ENCLAW_DB_PATH", "~/.local/state/enclaw/tasks.sqlite3"), projects)
             print(json.dumps(result, indent=2) if result else "No queued task was available.")
         return 0
-    except (PolicyError, TaskStoreError, RunnerError, RuntimeError, OSError, json.JSONDecodeError) as exc:
+    except (PolicyError, TaskStoreError, RunnerError, OrchestrationError, RuntimeError, OSError, json.JSONDecodeError) as exc:
         print(f"EnClaw stopped safely: {exc}", file=sys.stderr)
         return 2
 
