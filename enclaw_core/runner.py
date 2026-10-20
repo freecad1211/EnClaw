@@ -286,7 +286,8 @@ def run_one_task(
             )
         except RunnerError as worker_exc:
             raise RunnerError(f"Cannot load worker concurrency policy: {exc}; {worker_exc}") from exc
-    lease = store.acquire_project_slot(task["project_id"], limit)
+    lease_seconds = max(3600, int(policy["limits"]["max_task_minutes"]) * 60 + 900)
+    lease = store.acquire_project_slot(task["project_id"], limit, lease_seconds=lease_seconds)
     if lease is None:
         return None
     try:
