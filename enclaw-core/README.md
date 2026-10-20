@@ -1,6 +1,6 @@
 # EnClaw Core (preview)
 
-A dependency-free Python core for project-specific agent permissions and isolated Git workspaces. This is an initial implementation layer, not a complete Discord bot or autonomous agent runtime yet.
+A dependency-free Python core for project-specific agent permissions and isolated Git workspaces. This is the first executable core milestone, not a complete Discord bot or autonomous agent runtime yet.
 
 ## Requirements
 
@@ -12,7 +12,7 @@ No Python third-party packages are required.
 
 ## Quick start
 
-From the repository root:
+From the EnClaw repository root:
 
 ```bash
 python3 -m enclaw_core.cli init-project /path/to/your/project --id relune --base develop --integration enclaw/integration
@@ -22,32 +22,42 @@ python3 -m enclaw_core.cli show-policy /path/to/your/project/.enclaw/policy.json
 
 The initializer writes configuration only. It does not start agents, install dependencies, modify Git remotes, or change system services.
 
+Create the integration branch explicitly from your chosen base branch, then check it out in a separate worktree. Example:
+
+```bash
+git -C /path/to/your/project branch enclaw/integration develop
+git -C /path/to/your/project worktree add /path/to/relune-integration enclaw/integration
+```
+
+Keep the primary checkout clean. The integration worktree must remain clean between operations.
+
 ## Safe workspace workflow
 
 ```bash
-python3 -m enclaw_core.cli create-worktree /path/to/project/.enclaw/policy.json task-123 --branch enclaw/task/task-123
+python3 -m enclaw_core.cli create-worktree /path/to/your/project/.enclaw/policy.json task-123 --branch enclaw/task/task-123
 ```
 
-This creates an isolated worktree under the configured EnClaw workspace root. The task branch must use an allowed prefix and must not be protected.
+This creates an isolated worktree outside the main repository checkout. The task branch must use an allowed prefix and must not be protected.
 
-After implementation, request integration:
+After implementation and review, request integration:
 
 ```bash
-python3 -m enclaw_core.cli integrate /path/to/project/.enclaw/policy.json \
+python3 -m enclaw_core.cli integrate /path/to/your/project/.enclaw/policy.json \
   --source enclaw/task/task-123 \
-  --target enclaw/integration
+  --target enclaw/integration \
+  --review-approved
 ```
 
-Integration is refused unless the target is exactly the configured integration branch, the source is an allowed task branch, the target is not protected, and configured validation commands pass. Checks run as argument arrays without a shell. The candidate is merged in a temporary integration worktree; only a successful candidate is fast-forwarded into the integration worktree.
+The review flag is an explicit operator assertion in this core preview; it is not yet a cryptographically verified reviewer attestation. Do not wire it directly to untrusted model output. The integration command refuses to proceed unless the target is exactly the configured integration branch, the source is an allowed task branch, the target is not protected, the primary checkout and integration worktree are clean, and configured validation commands pass. A candidate merge is tested in a temporary worktree; only a successful candidate is fast-forwarded into the integration worktree.
 
-The first version intentionally does not merge to `main` or `develop`, deploy, install packages, or run Discord commands. Those are separate capabilities to be added behind the same policy engine.
+The first version intentionally does not merge to `main` or `develop`, deploy, install packages, or run Discord commands. Those are separate capabilities to add behind the same policy engine.
 
 ## Project policy
 
-Each project gets its own `.enclaw/policy.json`. Start with the generated defaults and customize them. Missing permissions deny the action. Keep policy files under version control, but never commit credentials or tokens.
+Each project gets its own `.enclaw/policy.json`. Start with generated defaults and customize them. Missing permissions deny the action. Keep policy files under version control, but never commit credentials or tokens.
 
 Important fields:
-- `git.base_branch`: branch used as the project baseline.
+- `git.base_branch`: branch used as the project baseline for task branches.
 - `git.integration_branch`: the only branch eligible for automated task integration.
 - `git.protected_branches`: branches that automated operations may never modify.
 - `git.allowed_task_branch_prefixes`: prefixes permitted for agent branches.
