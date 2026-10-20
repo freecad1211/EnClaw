@@ -92,18 +92,52 @@ def create_worktree(policy: dict[str, Any], task_id: str, branch: str) -> Path:
     return destination
 
 
-def _run_validation(candidate: Path, commands: Sequence[Sequence[str]], timeout_seconds: int) -> None:
+_SENSITIVE_ENV_SUFFIXES = ("_TOKEN", "_SECRET", "_PASSWORD")
+
+
+def _validation_env(runner: dict[str, Any]) -> dict[str, str]:
+    """Keep EnClaw/Discord secrets out of project validation subprocesses."""
+    passthrough = set(runner.get("env_passthrough", []))
+    env: dict[str, str] = {}
+    for key, value in os.environ.items():
+        upper = key.upper()
+        sensitive = upper.startswith("DISCORD_") or upper.endswith(_SENSITIVE_ENV_SUFFIXES)
+        if sensitive and key not in passthrough:
+            continue
+        env[key] = value
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
+def _run_validation(
+    candidate: Path,
+    commands: Sequence[Sequence[str]],
+    timeout_seconds: int,
+    runner: dict[str, Any],
+    task_id: str,
+) -> None:
+    sandbox_prefix = runner.get("sandbox_command", [])
+    if runner.get("require_sandbox", True) and not sandbox_prefix:
+        raise GitOperationError(
+            "Validation requires runner.sandbox_command when runner.require_sandbox is true."
+        )
+    prefix = [
+        part.replace("{worktree}", str(candidate)).replace("{task_id}", task_id)
+        for part in sandbox_prefix
+    ]
+    env = _validation_env(runner)
     for command in commands:
+        argv = [*prefix, *command]
         try:
             result = subprocess.run(
-                list(command),
+                argv,
                 cwd=candidate,
                 text=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 check=False,
                 timeout=timeout_seconds,
-                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+                env=env,
             )
         except subprocess.TimeoutExpired as exc:
             raise GitOperationError(f"Validation timed out: {command[0]}") from exc
@@ -170,7 +204,13 @@ def integrate_task_branch(
         created = True
         _git(candidate_path, "merge", "--no-ff", "--no-edit", source_branch)
         timeout_seconds = max(1, int(policy["limits"]["max_task_minutes"]) * 60)
-        _run_validation(candidate_path, policy["validation"]["commands"], timeout_seconds)
+        _run_validation(
+            candidate_path,
+            policy["validation"]["commands"],
+            timeout_seconds,
+            policy.get("runner", {}),
+            source_branch.replace("/", "-"),
+        )
         if policy["validation"]["require_independent_review"] and not review_approved:
             raise PolicyError("Review approval is required before integration.")
         # Fast-forward only: if the target moved, this fails rather than rewriting it.
