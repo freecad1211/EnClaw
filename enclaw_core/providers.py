@@ -19,6 +19,7 @@ class Provider:
     model: str
     api_key: str | None
     local: bool
+    free: bool
 
 
 def configured_providers(policy: dict[str, Any], environ: dict[str, str] | None = None) -> list[Provider]:
@@ -33,6 +34,7 @@ def configured_providers(policy: dict[str, Any], environ: dict[str, str] | None 
             model=ollama_model,
             api_key=None,
             local=True,
+            free=True,
         )
 
     compatible_model = env.get("OPENAI_COMPAT_MODEL", "").strip()
@@ -44,6 +46,7 @@ def configured_providers(policy: dict[str, Any], environ: dict[str, str] | None 
             model=compatible_model,
             api_key=env.get("OPENAI_COMPAT_API_KEY") or None,
             local=compatible_url.startswith(("http://127.0.0.1", "http://localhost", "http://[::1]")),
+            free=env.get("OPENAI_COMPAT_IS_FREE", "false").strip().lower() in {"1", "true", "yes"},
         )
 
     preference = policy["providers"]["preference"]
@@ -51,7 +54,7 @@ def configured_providers(policy: dict[str, Any], environ: dict[str, str] | None 
     if policy["providers"]["local_only"]:
         selected = [provider for provider in selected if provider.local]
     if not policy["providers"]["allow_paid_fallback"]:
-        selected = [provider for provider in selected if provider.local or provider.provider_id == "ollama"]
+        selected = [provider for provider in selected if provider.local or provider.free or policy["providers"]["allow_paid_fallback"]]
     return selected
 
 
