@@ -115,6 +115,7 @@ def _run_validation(
     timeout_seconds: int,
     runner: dict[str, Any],
     task_id: str,
+    repo_root: Path,
 ) -> None:
     sandbox_prefix = runner.get("sandbox_command", [])
     if runner.get("require_sandbox", True) and not sandbox_prefix:
@@ -122,7 +123,9 @@ def _run_validation(
             "Validation requires runner.sandbox_command when runner.require_sandbox is true."
         )
     prefix = [
-        part.replace("{worktree}", str(candidate)).replace("{task_id}", task_id)
+        part.replace("{worktree}", str(candidate))
+            .replace("{repo_root}", str(repo_root))
+            .replace("{task_id}", task_id)
         for part in sandbox_prefix
     ]
     env = _validation_env(runner)
@@ -210,6 +213,7 @@ def integrate_task_branch(
             timeout_seconds,
             policy.get("runner", {}),
             source_branch.replace("/", "-"),
+            Path(policy["project"]["repo_root"]).resolve(),
         )
         if policy["validation"]["require_independent_review"] and not review_approved:
             raise PolicyError("Review approval is required before integration.")
