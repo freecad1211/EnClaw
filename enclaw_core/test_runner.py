@@ -82,7 +82,7 @@ class RunnerSafetyTests(unittest.TestCase):
                 "python3", "-c", "from pathlib import Path; Path('generated.txt').write_text('ok')", "{prompt}"
             ]
             policy["runner"]["review_command"] = [
-                "python3", "-c", "print('APPROVE')", "{prompt}"
+                "python3", "-c", "print('ENCLAW_REVIEW_RESULT=APPROVE')", "{prompt}"
             ]
             policy_path = Path(temporary) / "policy.json"
             policy_path.write_text(json.dumps(policy), encoding="utf-8")

@@ -41,6 +41,7 @@ def build_docker_argv(
     command: Sequence[str],
     network: str = "none",
     env_keys: Sequence[str] = (),
+    read_only_worktree: bool = False,
 ) -> list[str]:
     """Build a fail-closed Docker argv. Never invoke a shell or pull an image."""
     if not image or image.startswith("-") or any(ch.isspace() for ch in image):
@@ -85,6 +86,9 @@ def build_docker_argv(
         if key not in os.environ:
             raise DockerSandboxError(f"Requested environment variable is not set: {key}")
 
+    worktree_mount = f"type=bind,src={worktree},dst={worktree}"
+    if read_only_worktree:
+        worktree_mount += ",readonly"
     argv = [
         "docker", "run", "--rm", "--init", "--pull=never",
         "--network", network,
@@ -98,7 +102,7 @@ def build_docker_argv(
         "--tmpfs", "/tmp:rw,nosuid,nodev,size=256m",
         "--env", "HOME=/tmp/enclaw-home",
         "--env", "TMPDIR=/tmp",
-        "--mount", f"type=bind,src={worktree},dst={worktree}",
+        "--mount", worktree_mount,
         "--mount", f"type=bind,src={common_dir},dst={common_dir},readonly",
         "--workdir", str(worktree),
     ]
@@ -108,7 +112,7 @@ def build_docker_argv(
         argv.extend(["--add-host", "host.docker.internal:host-gateway"])
     for key in keys:
         argv.extend(["--env", key])
-    argv.extend([image, *command])
+    argv.extend(["--entrypoint", command[0], image, *command[1:]])
     return argv
 
 
@@ -126,6 +130,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--network", choices=("none", "bridge"), default="none")
     parser.add_argument("--env-key", action="append", default=[])
+    parser.add_argument("--read-only-worktree", action="store_true")
     try:
         config = parser.parse_args(options)
         docker_argv = build_docker_argv(
@@ -135,6 +140,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             command=command,
             network=config.network,
             env_keys=config.env_key,
+            read_only_worktree=config.read_only_worktree,
         )
         result = subprocess.run(docker_argv, check=False)
         return result.returncode

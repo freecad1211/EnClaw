@@ -26,3 +26,5 @@ build/
 # Editor / OS noise
 .DS_Store
 *.swp
+.aider*
+.enclaw/policy.json

@@ -17,6 +17,7 @@ from typing import Any, Sequence
 
 from .git_workspace import GitOperationError, create_worktree, integrate_task_branch, _git
 from .policy import PolicyError, load_policy, require_capability
+from .sandbox import render_sandbox_prefix
 from .tasks import TaskStore, TaskStoreError
 
 
@@ -72,14 +73,16 @@ def _apply_sandbox(
     worktree: Path,
     task_id: str,
     repo_root: Path,
+    *,
+    network: str = "none",
+    env_keys: Sequence[str] = (),
+    read_only: bool = False,
 ) -> list[str]:
     _require_sandbox_configured(runner)
-    prefix = [
-        part.replace("{worktree}", str(worktree))
-            .replace("{repo_root}", str(repo_root))
-            .replace("{task_id}", task_id)
-        for part in runner.get("sandbox_command", [])
-    ]
+    prefix = render_sandbox_prefix(
+        runner.get("sandbox_command", []), worktree, repo_root, task_id,
+        network=network, env_keys=env_keys, read_only=read_only,
+    )
     return [*prefix, *argv]
 
 
@@ -262,6 +265,8 @@ def _run_one_task_claimed(
         command = _apply_sandbox(
             runner, _format_command(agent_command, prompt, worktree, task_id),
             worktree, task_id, Path(policy["project"]["repo_root"]),
+            network="bridge" if runner.get("env_passthrough") else "none",
+            env_keys=runner.get("env_passthrough", []),
         )
         return_code, output = _run_bounded(command, worktree, timeout, store, task_id, env=_agent_env(runner))
         if return_code != 0:
@@ -285,26 +290,41 @@ def _run_one_task_claimed(
         commit_before_review = _git(worktree, "rev-parse", "HEAD").stdout.strip()
         task = store.transition(task_id, "validating", actor=actor, details={"commit": commit_before_review, "changed_paths": paths})
 
-        diff = _git(worktree, "show", "--format=fuller", "--stat", "HEAD").stdout
+        diff = _git(
+            worktree, "show", "--format=fuller", "--no-ext-diff", "--no-renames", "HEAD"
+        ).stdout
+        if len(diff.encode("utf-8")) > 65536:
+            raise RunnerError("Review diff exceeds the 64 KiB limit; refusing an incomplete review.")
         review_prompt = (
             "You are an independent, read-only code reviewer. Do not modify files. "
-            "Inspect the committed change in the current worktree and the task requirements below. "
+            "Review the supplied full patch against the task requirements. "
             "Look for correctness, security, missing tests, regressions, and policy violations. "
-            "Your first non-empty output line must be exactly APPROVE or REJECT. "
-            "Approve only if the change is acceptable; explain blocking findings after REJECT.\n\n"
-            f"Task: {task['title']}\n{task['description']}\n\nCommit summary:\n{diff}"
+            "The final non-empty output line must be exactly "
+            "ENCLAW_REVIEW_RESULT=APPROVE or ENCLAW_REVIEW_RESULT=REJECT. "
+            "Approve only if acceptable; explain blocking findings before REJECT.\n\n"
+            f"Task: {task['title']}\n{task['description']}\n\nFull patch:\n{diff}"
         )
         review_argv = _apply_sandbox(
             runner, _format_command(review_command, review_prompt, worktree, task_id),
             worktree, task_id, Path(policy["project"]["repo_root"]),
+            network="bridge" if runner.get("env_passthrough") else "none",
+            env_keys=runner.get("env_passthrough", []), read_only=True,
         )
         review_code, review_output = _run_bounded(review_argv, worktree, timeout, store, task_id, env=_agent_env(runner))
         if review_code != 0:
             raise RunnerError(f"Reviewer command exited with status {review_code}:\n{review_output[-3000:]}")
         if _git(worktree, "rev-parse", "HEAD").stdout.strip() != commit_before_review or _changed_paths(worktree):
             raise RunnerError("Reviewer changed the worktree; review must be read-only.")
-        first_line = next((line.strip() for line in review_output.splitlines() if line.strip()), "")
-        if first_line != "APPROVE":
+        review_lines = [line.strip() for line in review_output.splitlines() if line.strip()]
+        result_markers = [line for line in review_lines if line in {
+            "ENCLAW_REVIEW_RESULT=APPROVE", "ENCLAW_REVIEW_RESULT=REJECT",
+        }]
+        if (
+            len(result_markers) != 1
+            or not review_lines
+            or review_lines[-1] != result_markers[0]
+            or result_markers[0] != "ENCLAW_REVIEW_RESULT=APPROVE"
+        ):
             raise RunnerError(f"Independent review did not approve the change: {review_output[-3000:]}")
         task = store.transition(task_id, "integrating", actor=actor, details={"review": "APPROVE"})
         result = integrate_task_branch(

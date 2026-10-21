@@ -170,6 +170,21 @@ def validate_policy(policy: Any) -> dict[str, Any]:
         raise PolicyError("runner.sandbox_command must be an array of non-empty strings.")
     if sandbox_command and (sandbox_command[-1] != "--" or any("{prompt}" in part for part in sandbox_command)):
         raise PolicyError("runner.sandbox_command must end with '--' and must not contain {prompt}.")
+    if any("{env_keys}" in part and part != "{env_keys}" for part in sandbox_command):
+        raise PolicyError("runner.sandbox_command must use {env_keys} as a standalone argument.")
+    if sandbox_command.count("{env_keys}") > 1:
+        raise PolicyError("runner.sandbox_command may contain {env_keys} only once.")
+    if any("{read_only}" in part and part != "{read_only}" for part in sandbox_command):
+        raise PolicyError("runner.sandbox_command must use {read_only} as a standalone argument.")
+    if sandbox_command.count("{read_only}") > 1:
+        raise PolicyError("runner.sandbox_command may contain {read_only} only once.")
+    for index, part in enumerate(sandbox_command):
+        if part == "--network" and (index + 1 >= len(sandbox_command) or sandbox_command[index + 1] != "{network}"):
+            raise PolicyError("runner.sandbox_command must use {network} after --network.")
+        if part == "--env-key" and (index + 1 >= len(sandbox_command) or sandbox_command[index + 1] != "{env_keys}"):
+            raise PolicyError("runner.sandbox_command must use {env_keys} after --env-key.")
+    if any("{network}" in part and part != "{network}" for part in sandbox_command):
+        raise PolicyError("runner.sandbox_command must use {network} as a standalone argument.")
     if not isinstance(runner.get("require_sandbox"), bool):
         raise PolicyError("runner.require_sandbox must be a boolean.")
     passthrough = runner.get("env_passthrough")

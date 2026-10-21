@@ -27,7 +27,9 @@ Build or obtain an image containing the exact CLI and runtime needed. The image 
       "--image", "enclaw-agent:local",
       "--worktree", "{worktree}",
       "--repo-root", "{repo_root}",
-      "--network", "none",
+      "--network", "{network}",
+      "{env_keys}",
+      "{read_only}",
       "--"
     ],
     "require_sandbox": true
@@ -39,8 +41,8 @@ Use the absolute path to EnClaw's `docker_sandbox.py`: the worker's current dire
 
 ### Explicit API access
 
-Network access is disabled by default. If a remote or LAN API is required, the operator must deliberately change `--network none` to `--network bridge`. Bridge mode grants general container network access; it is not an endpoint allowlist. It also adds `host.docker.internal` as a host-gateway name but does not guarantee the host API is listening on an address reachable from Docker.
+The sandbox template may use `{network}`, `{env_keys}`, and `{read_only}` as standalone placeholders. EnClaw renders agent and reviewer calls with `network=bridge` only when `runner.env_passthrough` is non-empty, passing only those permitted keys; reviewer calls additionally use a read-only worktree mount. Without passthrough keys, agent and reviewer network access is `none`. Validation calls always use `network=none` and no forwarded keys. Bridge mode grants general container network access; it is not an endpoint allowlist. It also adds `host.docker.internal` as a host-gateway name but does not guarantee the host API is listening on an address reachable from Docker.
 
-Only forward credentials that the CLI needs. For example, add `"--env-key", "OPENAI_COMPAT_API_KEY"` and/or `"--env-key", "OPENAI_COMPAT_BASE_URL"` before the final `"--"`. The variable must be present in the worker process environment; sensitive variables also need to be explicitly permitted through `runner.env_passthrough`. Never put API keys in the policy file or image.
+The variable must be present in the worker process environment. Never put API keys in the policy file or image. Keep validation commands credential-free and use per-stage network access only when required.
 
 Do not enable workers until the exact image, CLI, API connectivity, reviewer behavior, and the full EnClaw test suite have been checked. A Docker smoke test alone is not proof that agent execution is safely configured.

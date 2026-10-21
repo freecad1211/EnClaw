@@ -5,6 +5,7 @@ or container/VM boundary.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,46 @@ from typing import Sequence
 
 class SandboxError(RuntimeError):
     """Raised when the Linux sandbox cannot be safely initialized."""
+
+
+def render_sandbox_prefix(
+    template: Sequence[str],
+    worktree: Path,
+    repo_root: Path,
+    task_id: str,
+    *,
+    network: str,
+    env_keys: Sequence[str] = (),
+    read_only: bool = False,
+) -> list[str]:
+    """Render a sandbox argv template for one execution stage."""
+    if network not in {"none", "bridge"}:
+        raise SandboxError("Sandbox network must be none or bridge.")
+    if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) for key in env_keys):
+        raise SandboxError("Sandbox environment keys must be valid variable names.")
+
+    values = {
+        "{worktree}": str(worktree),
+        "{repo_root}": str(repo_root),
+        "{task_id}": task_id,
+        "{network}": network,
+    }
+    rendered: list[str] = []
+    for part in template:
+        if part == "{env_keys}":
+            for key in env_keys:
+                rendered.extend(["--env-key", key])
+            continue
+        if part == "{read_only}":
+            if read_only:
+                rendered.append("--read-only-worktree")
+            continue
+        if "{env_keys}" in part or "{read_only}" in part:
+            raise SandboxError("{env_keys} and {read_only} must be standalone sandbox arguments.")
+        for placeholder, value in values.items():
+            part = part.replace(placeholder, value)
+        rendered.append(part)
+    return rendered
 
 
 _MASKED_ROOTS = (Path("/home"), Path("/root"), Path("/tmp"))

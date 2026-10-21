@@ -60,7 +60,8 @@ class DockerSandboxTests(unittest.TestCase):
         self.assertNotIn("/var/run/docker.sock", " ".join(argv))
         mount_specs = [argv[i + 1] for i, item in enumerate(argv[:-1]) if item == "--mount"]
         self.assertFalse(any(mount.startswith(f"type=bind,src={Path.home()},dst=") for mount in mount_specs))
-        self.assertEqual(argv[-3:], ["agent-cli", "run", "prompt"])
+        self.assertEqual(argv[argv.index("--entrypoint") + 1], "agent-cli")
+        self.assertEqual(argv[-3:], ["enclaw-agent:test", "run", "prompt"])
 
     def test_git_common_metadata_is_read_only_and_worktree_is_writable(self):
         argv = self.build()
@@ -72,6 +73,16 @@ class DockerSandboxTests(unittest.TestCase):
         argv = self.build(network="bridge")
         self.assertEqual(argv[argv.index("--network") + 1], "bridge")
         self.assertIn("host.docker.internal:host-gateway", argv)
+
+    def test_reviewer_worktree_mount_is_read_only(self):
+        argv = self.build(read_only_worktree=True)
+        mounts = [argv[i + 1] for i, item in enumerate(argv[:-1]) if item == "--mount"]
+        worktree_mount = next(mount for mount in mounts if f"src={self.worktree.resolve()},dst=" in mount)
+        self.assertTrue(worktree_mount.endswith(",readonly"))
+        writable = self.build()
+        writable_mounts = [writable[i + 1] for i, item in enumerate(writable[:-1]) if item == "--mount"]
+        writable_worktree_mount = next(mount for mount in writable_mounts if f"src={self.worktree.resolve()},dst=" in mount)
+        self.assertFalse(writable_worktree_mount.endswith(",readonly"))
 
     def test_only_explicit_environment_keys_are_forwarded(self):
         with mock.patch.dict(os.environ, {"OPENAI_COMPAT_API_KEY": "secret", "DISCORD_BOT_TOKEN": "should-not-pass"}):

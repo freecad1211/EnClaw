@@ -10,7 +10,7 @@ from unittest import mock
 
 from .policy import default_policy, validate_policy
 from .runner import RunnerError, _agent_env, run_one_task
-from .sandbox import SandboxError, build_bwrap_argv
+from .sandbox import SandboxError, build_bwrap_argv, render_sandbox_prefix
 from .tasks import TaskStore
 
 
@@ -42,7 +42,7 @@ def _make_project(temporary: Path, name: str, *, agent_code: str, require_sandbo
     policy["project"]["workspace_root"] = str(temporary / f"{name}-worktrees")
     policy["validation"]["commands"] = [["python3", "-c", "pass"]]
     policy["runner"]["agent_command"] = ["python3", "-c", agent_code, "{prompt}"]
-    policy["runner"]["review_command"] = ["python3", "-c", "print('APPROVE')", "{prompt}"]
+    policy["runner"]["review_command"] = ["python3", "-c", "print('ENCLAW_REVIEW_RESULT=APPROVE')", "{prompt}"]
     policy["runner"]["require_sandbox"] = require_sandbox
     if sandbox_command:
         policy["runner"]["sandbox_command"] = sandbox_command
@@ -55,6 +55,89 @@ WRITE_FILE = "from pathlib import Path; Path('generated.txt').write_text('ok')"
 
 
 class SandboxEnforcementTests(unittest.TestCase):
+    def test_sandbox_prefix_is_stage_specific(self):
+        template = ["sandbox", "--network", "{network}", "{env_keys}", "{read_only}", "--"]
+        worktree = Path("/tmp/task-worktree")
+        repo_root = Path("/tmp/repo")
+        agent = render_sandbox_prefix(
+            template, worktree, repo_root, "task-1", network="bridge", env_keys=["OPENAI_API_KEY"],
+        )
+        reviewer = render_sandbox_prefix(
+            template, worktree, repo_root, "task-1", network="bridge",
+            env_keys=["OPENAI_API_KEY"], read_only=True,
+        )
+        validation = render_sandbox_prefix(
+            template, worktree, repo_root, "task-1", network="none", env_keys=(),
+        )
+        self.assertEqual(agent, ["sandbox", "--network", "bridge", "--env-key", "OPENAI_API_KEY", "--"])
+        self.assertEqual(reviewer, [
+            "sandbox", "--network", "bridge", "--env-key", "OPENAI_API_KEY", "--read-only-worktree", "--",
+        ])
+        self.assertEqual(validation, ["sandbox", "--network", "none", "--"])
+
+    def test_sandbox_prefix_rejects_embedded_env_key_placeholder(self):
+        with self.assertRaisesRegex(SandboxError, "standalone"):
+            render_sandbox_prefix(
+                ["--env-key={env_keys}"], Path("/tmp/w"), Path("/tmp/r"), "t", network="none",
+            )
+
+    def test_task_uses_bridge_only_for_agent_and_reviewer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            calls = tmp / "sandbox-calls.jsonl"
+            wrapper = (
+                "import json, subprocess, sys;"
+                "separator = sys.argv.index('--');"
+                f"open({str(calls)!r}, 'a', encoding='utf-8').write(json.dumps(sys.argv[1:separator]) + '\\n');"
+                "sys.exit(subprocess.call(sys.argv[separator + 1:]))"
+            )
+            entry = _make_project(
+                tmp, "p", agent_code=WRITE_FILE, require_sandbox=True,
+                sandbox_command=["python3", "-c", wrapper, "--network", "{network}", "{env_keys}", "{read_only}", "--"],
+            )
+            policy_path = Path(entry["policy_path"])
+            policy = json.loads(policy_path.read_text(encoding="utf-8"))
+            policy["runner"]["env_passthrough"] = ["OPENAI_API_KEY"]
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            database = tmp / "tasks.sqlite3"
+            store = TaskStore(database)
+            task = store.create("p", "title", "description")
+            with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-only"}):
+                result = run_one_task(database, {"p": entry})
+            self.assertEqual(result["status"], "completed")
+            calls_made = [json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(calls_made, [
+                ["--network", "bridge", "--env-key", "OPENAI_API_KEY"],
+                ["--network", "bridge", "--env-key", "OPENAI_API_KEY", "--read-only-worktree"],
+                ["--network", "none"],
+            ])
+            self.assertEqual(store.get(task["task_id"])["status"], "completed")
+
+    def test_task_without_passthrough_credentials_gets_no_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            calls = tmp / "sandbox-calls.jsonl"
+            wrapper = (
+                "import json, subprocess, sys;"
+                "separator = sys.argv.index('--');"
+                f"open({str(calls)!r}, 'a', encoding='utf-8').write(json.dumps(sys.argv[1:separator]) + '\\n');"
+                "sys.exit(subprocess.call(sys.argv[separator + 1:]))"
+            )
+            entry = _make_project(
+                tmp, "p", agent_code=WRITE_FILE, require_sandbox=True,
+                sandbox_command=["python3", "-c", wrapper, "--network", "{network}", "{env_keys}", "{read_only}", "--"],
+            )
+            database = tmp / "tasks.sqlite3"
+            TaskStore(database).create("p", "title", "description")
+            result = run_one_task(database, {"p": entry})
+            self.assertEqual(result["status"], "completed")
+            calls_made = [json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(calls_made, [
+                ["--network", "none"],
+                ["--network", "none", "--read-only-worktree"],
+                ["--network", "none"],
+            ])
+
     def test_missing_sandbox_fails_closed_before_creating_a_worktree(self):
         with tempfile.TemporaryDirectory() as tmp:
             tmp = Path(tmp)
@@ -88,6 +171,32 @@ class SandboxEnforcementTests(unittest.TestCase):
             self.assertEqual(result["status"], "completed")
             self.assertEqual(marker.read_text(), "xxx")  # agent + reviewer + validation
             self.assertEqual(store.get(task["task_id"])["status"], "completed")
+
+
+class ReviewerDiffTests(unittest.TestCase):
+    def test_reviewer_receives_full_committed_patch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            prompt_file = tmp / "review-prompt.txt"
+            entry = _make_project(tmp, "p", agent_code=WRITE_FILE)
+            policy_path = Path(entry["policy_path"])
+            policy = json.loads(policy_path.read_text(encoding="utf-8"))
+            capture_code = (
+                "from pathlib import Path; import sys; "
+                f"Path({str(prompt_file)!r}).write_text(sys.argv[-1]); "
+                "print('ENCLAW_REVIEW_RESULT=APPROVE')"
+            )
+            policy["runner"]["review_command"] = ["python3", "-c", capture_code, "{prompt}"]
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            database = tmp / "tasks.sqlite3"
+            store = TaskStore(database)
+            store.create("p", "title", "description")
+            result = run_one_task(database, {"p": entry})
+            self.assertEqual(result["status"], "completed")
+            review_prompt = prompt_file.read_text(encoding="utf-8")
+            self.assertIn("Full patch:", review_prompt)
+            self.assertIn("diff --git a/generated.txt b/generated.txt", review_prompt)
+            self.assertIn("+ok", review_prompt)
 
 
 class EnvironmentScrubbingTests(unittest.TestCase):
