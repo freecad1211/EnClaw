@@ -80,6 +80,30 @@ def _is_masked(path: Path) -> bool:
     return any(path == root or root in path.parents for root in _MASKED_ROOTS)
 
 
+def _write_bwrap_failure(stderr: str) -> None:
+    """Explain common namespace initialization failures without weakening isolation."""
+    if stderr:
+        print(stderr, file=sys.stderr, end="" if stderr.endswith("\n") else "\n")
+
+    normalized = stderr.lower()
+    uid_map_denied = (
+        "uid map" in normalized and "permission denied" in normalized
+    ) or (
+        "uid_map" in normalized and ("permission denied" in normalized or "denied" in normalized)
+    )
+    if uid_map_denied:
+        print(
+            "\nEnClaw could not initialize Bubblewrap's user namespace (UID mapping was denied).\n"
+            "This commonly indicates an AppArmor unprivileged_userns policy restriction.\n"
+            "Inspect the kernel audit log with:\n"
+            "  sudo journalctl -k --since '5 minutes ago' --no-pager "
+            "| grep -Ei 'apparmor=\"DENIED\"|userns|bwrap|uid_map'\n"
+            "Keep the sandbox enabled and resolve the host policy; EnClaw will not retry "
+            "without isolation.",
+            file=sys.stderr,
+        )
+
+
 def build_bwrap_argv(worktree: Path, repo_root: Path, command: Sequence[str]) -> list[str]:
     """Build a fail-closed bubblewrap invocation without a shell."""
     if sys.platform != "linux":
@@ -160,7 +184,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     try:
         command_argv = build_bwrap_argv(Path(values["--worktree"]), Path(values["--repo-root"]), command)
-        return subprocess.run(command_argv, check=False).returncode
+        completed = subprocess.run(
+            command_argv, check=False, stderr=subprocess.PIPE, text=True,
+        )
+        if completed.returncode != 0:
+            _write_bwrap_failure(completed.stderr or "")
+        elif completed.stderr:
+            print(completed.stderr, file=sys.stderr, end="" if completed.stderr.endswith("\n") else "\n")
+        return completed.returncode
     except (OSError, SandboxError, subprocess.SubprocessError) as exc:
         print(f"EnClaw sandbox refused execution: {exc}", file=sys.stderr)
         return 2
