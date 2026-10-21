@@ -104,7 +104,8 @@ Provider endpoint compatibility and quota behavior must be checked individually.
 
 - Run EnClaw as a dedicated unprivileged OS user.
 - Agent/reviewer and integration validation commands require a configured `runner.sandbox_command` prefix by default (`runner.require_sandbox`). Validation subprocesses also omit Discord tokens and sensitive token/secret/password/API-key/access-key/private-key/credential environment variables unless explicitly listed in `runner.env_passthrough`.
-- An opt-in Linux bubblewrap backend is available. It separates the network namespace, hides home directories and temporary host files, mounts the worktree writable, and mounts shared Git metadata read-only. Install `bubblewrap` and verify user-namespace support before enabling it. It is defense in depth, not a replacement for a dedicated unprivileged account or container/VM boundary.
+- An opt-in Linux bubblewrap backend is available. It separates the network namespace, hides home directories and temporary host files, mounts the worktree writable, and mounts shared Git metadata read-only. On hosts where AppArmor blocks unprivileged user namespaces, it fails closed; do not disable AppArmor globally to make it work.
+- An experimental Docker sandbox launcher is available in `enclaw_core.docker_sandbox`. See [Docker sandbox setup](../docs/DOCKER_SANDBOX.md). It uses restrictive container defaults, network isolation by default, an explicit image, and explicit environment forwarding. It has not yet been validated end-to-end with a real coding CLI and should be treated as experimental.
 - Keep secrets out of policy files and Git.
 - Treat Discord messages, project instructions, and model output as untrusted.
-- Production deployment, protected-branch merging, OS/container sandboxing, authenticated reviewer attestations, role-specific agent scheduling, and trusted cost-budget accounting are not implemented in this milestone.
+- This is not yet a production-grade hostile-code isolation system. Production deployment, authenticated reviewer attestations, role-specific agent scheduling, and trusted cost-budget accounting are not implemented in this milestone.
