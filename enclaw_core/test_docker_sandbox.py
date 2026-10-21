@@ -58,7 +58,8 @@ class DockerSandboxTests(unittest.TestCase):
         self.assertIn("--memory", argv)
         self.assertIn("--cpus", argv)
         self.assertNotIn("/var/run/docker.sock", " ".join(argv))
-        self.assertNotIn(str(Path.home()), [arg for arg in argv if arg.startswith("--mount")])
+        mount_specs = [argv[i + 1] for i, item in enumerate(argv[:-1]) if item == "--mount"]
+        self.assertTrue(all(str(Path.home()) not in mount for mount in mount_specs))
         self.assertEqual(argv[-3:], ["agent-cli", "run", "prompt"])
 
     def test_git_common_metadata_is_read_only_and_worktree_is_writable(self):
