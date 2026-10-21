@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from .policy import PolicyError, require_capability
+from .sandbox import render_sandbox_prefix
 
 
 class GitOperationError(RuntimeError):
@@ -122,12 +123,9 @@ def _run_validation(
         raise GitOperationError(
             "Validation requires runner.sandbox_command when runner.require_sandbox is true."
         )
-    prefix = [
-        part.replace("{worktree}", str(candidate))
-            .replace("{repo_root}", str(repo_root))
-            .replace("{task_id}", task_id)
-        for part in sandbox_prefix
-    ]
+    prefix = render_sandbox_prefix(
+        sandbox_prefix, candidate, repo_root, task_id, network="none", env_keys=(),
+    )
     env = _validation_env(runner)
     for command in commands:
         argv = [*prefix, *command]

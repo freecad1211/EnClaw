@@ -198,7 +198,7 @@ def build_bot() -> discord.Client:
             return
         await interaction.response.send_message(
             f"Task queued: `{task['task_id']}` — {task['title']}\n"
-            "Queueing does not start an agent yet; the worker runtime is not implemented.",
+            "The task is queued; use /worker-once to process one queued task. No worker starts automatically.",
             ephemeral=True,
         )
 

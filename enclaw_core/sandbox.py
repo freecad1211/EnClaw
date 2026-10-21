@@ -5,6 +5,7 @@ or container/VM boundary.
 """
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -14,6 +15,46 @@ from typing import Sequence
 
 class SandboxError(RuntimeError):
     """Raised when the Linux sandbox cannot be safely initialized."""
+
+
+def render_sandbox_prefix(
+    template: Sequence[str],
+    worktree: Path,
+    repo_root: Path,
+    task_id: str,
+    *,
+    network: str,
+    env_keys: Sequence[str] = (),
+    read_only: bool = False,
+) -> list[str]:
+    """Render a sandbox argv template for one execution stage."""
+    if network not in {"none", "bridge"}:
+        raise SandboxError("Sandbox network must be none or bridge.")
+    if any(not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) for key in env_keys):
+        raise SandboxError("Sandbox environment keys must be valid variable names.")
+
+    values = {
+        "{worktree}": str(worktree),
+        "{repo_root}": str(repo_root),
+        "{task_id}": task_id,
+        "{network}": network,
+    }
+    rendered: list[str] = []
+    for part in template:
+        if part == "{env_keys}":
+            for key in env_keys:
+                rendered.extend(["--env-key", key])
+            continue
+        if part == "{read_only}":
+            if read_only:
+                rendered.append("--read-only-worktree")
+            continue
+        if "{env_keys}" in part or "{read_only}" in part:
+            raise SandboxError("{env_keys} and {read_only} must be standalone sandbox arguments.")
+        for placeholder, value in values.items():
+            part = part.replace(placeholder, value)
+        rendered.append(part)
+    return rendered
 
 
 _MASKED_ROOTS = (Path("/home"), Path("/root"), Path("/tmp"))
@@ -37,6 +78,30 @@ def _masked_parent_dirs(path: Path) -> list[str]:
 
 def _is_masked(path: Path) -> bool:
     return any(path == root or root in path.parents for root in _MASKED_ROOTS)
+
+
+def _write_bwrap_failure(stderr: str) -> None:
+    """Explain common namespace initialization failures without weakening isolation."""
+    if stderr:
+        print(stderr, file=sys.stderr, end="" if stderr.endswith("\n") else "\n")
+
+    normalized = stderr.lower()
+    uid_map_denied = (
+        "uid map" in normalized and "permission denied" in normalized
+    ) or (
+        "uid_map" in normalized and ("permission denied" in normalized or "denied" in normalized)
+    )
+    if uid_map_denied:
+        print(
+            "\nEnClaw could not initialize Bubblewrap's user namespace (UID mapping was denied).\n"
+            "This commonly indicates an AppArmor unprivileged_userns policy restriction.\n"
+            "Inspect the kernel audit log with:\n"
+            "  sudo journalctl -k --since '5 minutes ago' --no-pager "
+            "| grep -Ei 'apparmor=\"DENIED\"|userns|bwrap|uid_map'\n"
+            "Keep the sandbox enabled and resolve the host policy; EnClaw will not retry "
+            "without isolation.",
+            file=sys.stderr,
+        )
 
 
 def build_bwrap_argv(worktree: Path, repo_root: Path, command: Sequence[str]) -> list[str]:
@@ -119,7 +184,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
     try:
         command_argv = build_bwrap_argv(Path(values["--worktree"]), Path(values["--repo-root"]), command)
-        return subprocess.run(command_argv, check=False).returncode
+        completed = subprocess.run(
+            command_argv, check=False, stderr=subprocess.PIPE, text=True,
+        )
+        if completed.returncode != 0:
+            _write_bwrap_failure(completed.stderr or "")
+        elif completed.stderr:
+            print(completed.stderr, file=sys.stderr, end="" if completed.stderr.endswith("\n") else "\n")
+        return completed.returncode
     except (OSError, SandboxError, subprocess.SubprocessError) as exc:
         print(f"EnClaw sandbox refused execution: {exc}", file=sys.stderr)
         return 2

@@ -40,6 +40,18 @@ class PolicyTests(unittest.TestCase):
         with self.assertRaises(PolicyError):
             validate_policy(policy)
 
+    def test_sandbox_network_must_be_stage_specific(self):
+        policy = default_policy("sample", str(Path.cwd()))
+        policy["runner"]["sandbox_command"] = ["sandbox", "--network", "bridge", "--"]
+        with self.assertRaisesRegex(PolicyError, "{network}"):
+            validate_policy(policy)
+
+    def test_sandbox_env_keys_must_be_stage_specific(self):
+        policy = default_policy("sample", str(Path.cwd()))
+        policy["runner"]["sandbox_command"] = ["sandbox", "--env-key", "OPENAI_API_KEY", "--"]
+        with self.assertRaisesRegex(PolicyError, "{env_keys}"):
+            validate_policy(policy)
+
     def test_limits_cannot_be_negative(self):
         policy = default_policy("sample", str(Path.cwd()))
         policy["limits"]["max_retries"] = -1
