@@ -9,6 +9,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 
@@ -24,6 +25,7 @@ TASK_STATES = {
     "cancelled",
 }
 TERMINAL_STATES = {"completed", "failed", "cancelled"}
+_INITIALIZE_LOCK = Lock()
 TRANSITIONS = {
     "queued": {"planning", "cancelled"},
     "planning": {"running", "failed", "cancelled"},
@@ -59,8 +61,20 @@ class TaskStore:
         return connection
 
     def _initialize(self) -> None:
-        with self._connect() as db:
-            db.execute("PRAGMA journal_mode = WAL")
+        with _INITIALIZE_LOCK, self._connect() as db:
+            for attempt in range(4):
+                try:
+                    db.execute("PRAGMA journal_mode = WAL")
+                    break
+                except sqlite3.OperationalError as exc:
+                    error_code = exc.sqlite_errorcode
+                    if (
+                        attempt == 3
+                        or error_code is None
+                        or (error_code & 0xFF) not in {sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED}
+                    ):
+                        raise
+                    time.sleep(0.05 * (attempt + 1))
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS tasks (
                     task_id TEXT PRIMARY KEY,
