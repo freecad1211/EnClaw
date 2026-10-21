@@ -1,0 +1,8 @@
+{
+  "projects": [
+    {
+      "id": "relune",
+      "policy_path": "/home/enclaw/projects/relune/.enclaw/policy.json"
+    }
+  ]
+}

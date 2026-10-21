@@ -1,55 +1,102 @@
-# EJClaw v2 — NanoClaw 위 얇은 래퍼
+# EnClaw — 자율 코딩 에이전트 플랫폼
 
-EJClaw는 더 이상 독립 앱이 아니다. **업스트림 NanoClaw + 최소 커스텀**으로 운용하는
-EYEJOKER 스택의 carry 저장소다. 구 Tribunal 스택(v0.x)은 2026-07-14 은퇴
-(`retire/nanoclaw-migration` 브랜치와 `~/archive/ejclaw-retired-20260714/`에 보존,
-필요한 사람은 알아서).
+**EnClaw는 여러 코딩 에이전트가 작업을 나누고, 격리된 Git 브랜치에서 코드를 수정·검토·검증한 뒤, 정책에 허용된 통합 브랜치에만 반영하도록 만드는 프로젝트**입니다.
 
-## 구조
+이 브랜치는 EnClaw 자체의 프로젝트 정책 엔진, 작업 큐, 코딩 워커, 리뷰 게이트와 Discord 제어 기능을 구축합니다.
 
-```text
-upstream nanoclaw (github.com/nanocoai/nanoclaw, main)
-  └─ eyejoker/carry-* 브랜치  ← 이 레포가 미러하는 carry 커밋 시리즈
-       ├─ feat(channels): Discord adapter
-       ├─ feat(providers): gpt-proxy (CLIProxyAPI Anthropic-compat, 16줄)
-       ├─ feat(container-runner): OneCLI CA env / git deploy key 활성화 / nested-claude 인증 sentinel
-       └─ docs: EYEJOKER_STACK.md (carry 인벤토리)
+> **현재 상태: 개발용 MVP.** 자동 작업 분해, 작업 큐, 제한된 워커 풀과 통합 보호 기능을 개발 중입니다. OS 수준 샌드박스, 신뢰 가능한 비용 추적, 역할별 에이전트 라우팅 등은 아직 완성되지 않았습니다. 실제 프로젝트나 운영 서버에 적용하기 전에 보안 검토와 테스트가 필요합니다.
 
-eyejoker/ (이 레포의 추가 payload — 나노클로 트리 밖 커스텀)
-  ├─ host-executor/        컨테이너→호스트 실행 MCP (Unix socket + audit log + op 토큰 주입)
-  │   ├─ server.py / client.py / test_server.py
-  │   ├─ nanoclaw-host-executor.service
-  │   └─ op.dropin.conf    (systemd drop-in — EnvironmentFile 참조만, 토큰 값 없음)
-  ├─ shared-claude-common.md   전 그룹 공용 지침 (배포 위치: ~/.config/nanoclaw/shared-claude/)
-  └─ mount-allowlist.json      마운트 allowlist 스냅샷 (배포 위치: ~/.config/nanoclaw/)
-```
+## 설계 목표
 
-## 운영 원칙
+- **프로젝트별 정책:** 저장소마다 허용 기능, 보호 브랜치, 검증 명령, 동시 실행 수와 재시도 한도를 다르게 설정합니다.
+- **격리된 작업 공간:** 에이전트별 Git worktree와 작업 브랜치를 사용해 변경 사항을 분리합니다.
+- **검토 후 통합:** 코딩 에이전트가 직접 통합하지 않습니다. 별도 리뷰 명령, 설정된 검증 명령, Git 통합 가드를 거칩니다.
+- **보호 브랜치 유지:** \`main\`, \`master\`, \`develop\`, \`production\`, \`release\` 같은 보호 브랜치로 직접 자동 병합하지 않습니다. 통합 대상은 프로젝트 정책에 지정한 전용 통합 브랜치입니다.
+- **로컬 우선:** Ollama 같은 로컬 모델을 우선 고려하고, 원격 OpenAI 호환 API는 정책에서 허용할 때만 사용하도록 설계합니다. 무료 여부는 공급자의 실제 요금표를 확인해야 합니다.
+- **Discord 제어:** 허용된 운영자만 작업을 등록하고, 상태를 확인하거나 워커를 시작할 수 있습니다.
+- **감사 가능한 실행:** SQLite 작업 상태와 이벤트 로그로 작업 진행을 추적합니다.
 
-- **커스텀은 최소로.** 새 기능이 필요하면 ① 나노클로 기본 설정으로 되는지 → ② 공식 확장점(프로바이더 registry, 스킬, MCP 등록)으로 되는지 → ③ 그래도 안 되면 carry 패치. 순서 엄수.
-- carry 패치는 항상 `eyejoker/carry-<날짜>` 브랜치의 독립 커밋으로. 업스트림 업데이트 시 rebase.
-- 시크릿은 이 레포에 절대 커밋하지 않는다 (1Password + .env, 여기엔 참조 경로만).
-- 라이브 설치는 `~/NanoClaw` (업스트림 clone + carry 브랜치). 이 레포는 그 carry의 백업/이력.
+## 현재 구현된 기능
 
-## 라이브 시스템 (algo 호스트)
-
-| 서비스 | 역할 |
+| 영역 | 상태 |
 |---|---|
-| `nanoclaw-v2-*.service` | 본체 (Discord 4방 + 스케줄러) |
-| `nanoclaw-host-executor.service` | 호스트 실행 MCP (audit: `~/.local/share/nanoclaw-host-executor/audit.jsonl`) |
-| `cliproxyapi.service` | Codex OAuth 풀 → Anthropic-compat 엔드포인트 |
+| 프로젝트별 JSON 정책 검증 | 구현 |
+| SQLite 작업 큐와 이벤트 로그 | 구현 |
+| 격리된 Git worktree 및 전용 통합 브랜치 보호 | 구현 |
+| 리뷰 및 검증 통과 후 통합 | 구현 코어, 실제 프로젝트별 검증 필요 |
+| 선택적 플래너 기반 하위 작업 생성 | 초기 구현 |
+| 제한된 워커 풀 및 프로젝트별 동시 실행 슬롯 | 초기 구현 |
+| 정책 한도 내 실패 작업 재시도 | 구현 |
+| Discord 작업 제어 명령 | 초기 구현 |
+| OS/컨테이너 샌드박스 | 미완성 |
+| 역할별 에이전트 구성과 에이전트 간 메시징 | 미완성 |
+| 신뢰할 수 있는 비용 예산 강제 | 미완성 |
+| 자동 복구·재개 및 자동 PR/배포 | 미완성 |
 
-지식 레이어: AgentMemory MCP(Hermes와 공유) + LLM Wiki(ro mount) + 그룹별 CLAUDE.local.md.
+구현 상태와 제한 사항은 [구현 현황](docs/IMPLEMENTATION_STATUS.md) 및 [코어 가이드](enclaw_core/README.md)를 참고하세요.
 
-## 재구축 절차 (요약)
+## 빠른 시작 — 코드와 테스트 확인
 
-1. `git clone https://github.com/nanocoai/nanoclaw ~/NanoClaw && cd ~/NanoClaw`
-2. 이 레포의 carry 브랜치를 remote로 추가해 cherry-pick (또는 `nanoclaw-src/` 미러에서 diff 적용)
-3. `eyejoker/host-executor/` → `~/nanoclaw-host-executor/` 복사, systemd unit + drop-in 설치
-4. `eyejoker/mount-allowlist.json`, `shared-claude-common.md` → `~/.config/nanoclaw/` 배치
-5. `.env` 구성 (Discord 토큰, CLIPROXY_BASE_URL 등 — 1Password 참조)
-6. `pnpm install && pnpm build`, 그룹/wiring은 `ncl` CLI로 재생성 (EYEJOKER_STACK.md 참고)
+요구 사항: Python 3.11 이상, Git 2.30 이상.
 
-## 잔존 v0 유산
+\`\`\`bash
+git clone --branch feature/project-policy-engine https://github.com/freecad1211/EnClaw.git
+cd EnClaw
 
-- `src/codex-usage-collector.ts` — 읽기 전용 Codex usage 수집기. usage 대시보드 부활 시 재사용.
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r requirements.txt
+
+python -m compileall -q enclaw_core
+python -m unittest discover -s enclaw_core -t . -v
+\`\`\`
+
+이 명령은 개발 브랜치를 내려받아 테스트합니다. **이것만으로 서비스가 자동 코딩을 시작하지는 않습니다.** 실제 에이전트 실행 전에는 프로젝트 정책, 명령어, 검증 단계와 실행 격리를 검토해야 합니다.
+
+## 작업 큐 및 워커 명령
+
+세부 CLI 사용법과 프로젝트 등록은 [코어 README](enclaw_core/README.md)를 참고하세요. 주요 명령은 다음과 같습니다.
+
+- \`task-create\`, \`task-list\`, \`task-show\`, \`task-cancel\`: 작업 큐 관리
+- \`task-retry\`: 정책의 재시도 한도 안에서 실패 작업 재등록
+- \`task-log\`: 작업의 최근 감사 이벤트와 세부 정보 확인
+- \`project-list\`: 등록된 프로젝트와 통합 브랜치 정책 확인
+- \`worker-status\`: 현재 Discord 프로세스의 워커 실행 상태와 마지막 오류 확인
+- \`orchestrate-once\`: 설정된 플래너로 작업을 제한된 하위 작업으로 분해
+- \`worker-once\`, \`worker-pool\`: 작업 워커 실행
+- \`orchestrate-refresh\`: 하위 작업 결과를 부모 작업 상태에 반영
+
+플래너는 기본적으로 비활성화되어 있으며, 프로젝트 정책에 명시적으로 설정해야 합니다. 워커 풀의 동시 실행 슬롯은 동일한 SQLite 데이터베이스를 공유하는 로컬 프로세스 사이에서 적용됩니다.
+
+## Discord 설정
+
+Discord 봇은 토큰과 운영자 ID가 설정된 경우에만 사용합니다. 비밀값은 소스 코드나 Git에 커밋하지 마세요. Discord 명령은 설정된 운영자 ID에 제한되어야 합니다. \`/project-list\`, \`/worker-status\`, \`/task-log\` 명령으로 프로젝트 정책 요약, 현재 프로세스의 워커 상태, 작업 감사 이벤트를 확인할 수 있습니다. 워커 실행 명령은 시작·완료·실패 결과를 비공개 후속 응답으로 보고합니다. 워커 상태는 현재 봇 프로세스 기준이며, 다른 프로세스의 워커 상태를 집계하는 전역 모니터링은 아닙니다.
+
+설치 및 설정 절차는 [Ubuntu 설정 가이드](docs/UBUNTU_SETUP.md)를 참고하세요. 현재 가이드는 개발용 체크아웃을 준비하기 위한 것이며, 운영 서버에 시스템 서비스로 설치하거나 자동 배포하는 절차가 아닙니다.
+
+## 보안 원칙
+
+1. 보호 브랜치로 직접 자동 병합하지 않습니다.
+2. 검증 명령이 없거나 실패하면 통합하지 않습니다.
+3. 에이전트 명령은 셸 문자열이 아닌 인자 배열로 설정합니다.
+4. 비밀값, 환경 파일, EnClaw 정책, CI 워크플로는 기본적으로 에이전트 변경 대상에서 제외합니다.
+5. 프로젝트별 권한은 기본 거부 원칙으로 설정합니다.
+6. **현재 워커는 EnClaw 프로세스를 실행한 OS 사용자의 권한으로 명령을 실행합니다.** 별도 OS 사용자나 컨테이너 샌드박스가 강제되지 않은 상태에서 신뢰할 수 없는 코드를 실행하지 마세요.
+7. 무료 모델 API라고 표시돼 있어도 실제 요금과 사용 한도를 직접 확인합니다.
+
+## 개발 계획
+
+- OS/컨테이너 격리와 워커 권한 분리
+- 역할별 플래너·코더·리뷰어 구성 및 에이전트 간 메시징
+- 작업 중단 후 안전한 재개와 자동 재시도 정책
+- 비용 추적 및 예산 한도 강제
+- 동시 작업·충돌·취소·실패 경로에 대한 추가 통합 테스트
+- 보안 검토가 끝난 뒤에만 Ubuntu 서비스 배포
+
+## 프로젝트 링크
+
+- 저장소: https://github.com/freecad1211/EnClaw
+- 개발 브랜치: https://github.com/freecad1211/EnClaw/tree/feature/project-policy-engine
+- 작업 PR: https://github.com/freecad1211/EnClaw/pull/1
+
+이 프로젝트는 아직 개발 중입니다. 기능이 구현됐다는 사실과 실제 환경에서 안전하게 운영할 수 있다는 사실은 다릅니다. 운영 배포 전에는 테스트 결과, 프로젝트별 정책, 실행 격리 설정을 별도로 검증하세요.
