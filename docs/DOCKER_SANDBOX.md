@@ -23,7 +23,7 @@ Build or obtain an image containing the exact CLI and runtime needed. The image 
 {
   "runner": {
     "sandbox_command": [
-      "python3", "-m", "enclaw_core.docker_sandbox",
+      "python3", "/absolute/path/to/EnClaw/enclaw_core/docker_sandbox.py",
       "--image", "enclaw-agent:local",
       "--worktree", "{worktree}",
       "--repo-root", "{repo_root}",
@@ -35,7 +35,7 @@ Build or obtain an image containing the exact CLI and runtime needed. The image 
 }
 ```
 
-The existing `agent_command` and `review_command` are appended after the final `--` and execute inside the image. Use container paths that exist in the image, such as `["opencode", "run", "{prompt}"]`, not host-only executable paths. Keep agent and reviewer commands genuinely independent.
+Use the absolute path to EnClaw's `docker_sandbox.py`: the worker's current directory is the target project's task worktree, which may not contain EnClaw itself. The existing `agent_command` and `review_command` are appended after the final `--` and execute inside the image. Use container paths that exist in the image, such as `["opencode", "run", "{prompt}"]`, not host-only executable paths. Keep agent and reviewer commands genuinely independent.
 
 ### Explicit API access
 
